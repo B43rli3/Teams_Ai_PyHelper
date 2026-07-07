@@ -313,3 +313,16 @@ class RequestRepository:
                 (RequestStatus.FAILED.value,),
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def list_recent(self, limit: int = 20) -> list[RequestRecord]:
+        """Letzte Requests unabhängig vom Status."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM requests
+                ORDER BY COALESCE(completed_at, started_at, created_at) DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._row_to_record(row) for row in rows]

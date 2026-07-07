@@ -477,13 +477,45 @@ Erwarteter Inhalt:
 
 #### Output-Ordner ist leer — trotzdem Erfolg?
 
-Wenn der Worker Meldungen wie `Outputdatei erstellt` und `erfolgreich verarbeitet` zeigt, die Datei im `output`-Ordner aber **fehlt**, ist das oft **normal**:
+Wenn der Worker Meldungen wie `Outputdatei erstellt` und `erfolgreich verarbeitet` zeigt, die Datei aber **nirgends** auffindbar ist, unterscheiden Sie zwei Fälle:
 
-| Ursache | Erklärung |
-|---------|-----------|
-| **Power Automate Flow 2 ist aktiv** | Flow 2 reagiert auf neue `response_*.json`-Dateien, veröffentlicht die Antwort in Teams und **verschiebt die Datei aus `output`** in einen `processed`-Bereich. Der Output-Ordner ist danach leer — das ist gewollt. |
-| **OneDrive-Synchronisierung** | Die Datei wurde lokal erstellt und sofort in die Cloud synchronisiert; Flow 2 greift nach dem Sync zu. |
-| **Erneuter Test mit gleicher requestId** | `test-001` wurde bereits verarbeitet (steht in SQLite). Für neue Tests `test-002`, `test-003` usw. verwenden. |
+##### Fall A — Flow 2 hat die Datei übernommen
+
+Flow 2 verschiebt Response-Dateien **nicht** nach `processed\input\` — dort landen nur **Input**-Dateien (archiviert von Python).
+
+| Ordner | Inhalt |
+|--------|--------|
+| `processed\input\` | Archivierte **Input**-JSONs (von Python) |
+| `processed\` (anderer Unterordner) | Archivierte **Response**-JSONs (von Flow 2, je nach Flow-Konfiguration) |
+| `output\` | Aktuelle Response-Dateien (kurzzeitig, bis Flow 2 sie holt) |
+
+Flow 2 kann Response-Dateien an einen **anderen Ort** verschieben als Python Input-Dateien archiviert. Prüfen Sie:
+
+```powershell
+# Gesamten TeamsLLM-Baum durchsuchen
+Get-ChildItem "C:\Users\nuern\OneDrive - Strabag BRVZ GmbH\TeamsLLM" -Recurse -Filter "response_test-002.json"
+
+# Power Automate: Flow-2-Ausführungsverlauf prüfen (Portal)
+# Hat Flow 2 die Datei verarbeitet? Erfolg oder Fehlerzweig?
+```
+
+##### Fall B — Lokaler Test mit erfundener chatId
+
+Die Testdatei aus der README enthält eine **erfundene** `chatId` (`19:meeting_test@thread.v2`). Wenn Flow 2 aktiv ist, kann er die Response-Datei zwar erkennen, aber **nicht in Teams posten** — und die Datei in einen **Fehlerzweig** verschieben oder löschen.
+
+**Empfehlung für rein lokalen Mock-Test ohne Flow-2-Eingriff:**
+
+1. Flow 2 vorübergehend **deaktivieren**, oder
+2. Sofort nach Worker-Meldung den Output prüfen, oder
+3. Echten Teams-Test mit `/ai`-Nachricht durchführen (echte `chatId` von Flow 1)
+
+##### Diagnose-Befehl
+
+```powershell
+.\.venv\Scripts\python.exe -m teams_ollama_bridge show-request test-001
+```
+
+Zeigt SQLite-Status, erwarteten Output-Pfad und sucht die Datei rekursiv unter `TeamsLLM`.
 
 **Erfolg prüfen, wenn Flow 2 aktiv ist:**
 
@@ -778,6 +810,7 @@ Alle Befehle über die virtuelle Umgebung:
 | `check` | Konfiguration, Verzeichnisse, Rechte, SQLite, Ollama prüfen | Nach Einrichtung oder Änderungen |
 | `process-file "C:\Pfad\datei.json"` | Einzelne Datei verarbeiten | Debugging |
 | `list-pending` | Offene und fehlgeschlagene Requests auflisten | Statusprüfung |
+| `show-request <requestId>` | Request-Status und Output-Dateisuche | Wenn Output-Datei fehlt |
 | `retry-failed` | Fehlgeschlagene Requests zurücksetzen | Nach Fehlerbehebung |
 | `discover-onedrive` | OneDrive-Pfade aus Umgebungsvariablen anzeigen | Ersteinrichtung |
 
@@ -972,7 +1005,7 @@ Nach einem Neustart des Workers oder PCs:
 |---------|---------|--------|
 | Projektordner fehlt nach Clone | `teams-ollama-bridge` nicht gefunden | `git pull origin main` im geklonten Repo ausführen |
 | Testdatei im falschen Ordner | Worker reagiert nicht | Datei muss in `TeamsLLM\input\` liegen, **nicht** direkt in `TeamsLLM\` |
-| Output leer trotz Worker-Erfolg | `Outputdatei erstellt` im Log, aber `output\` leer | Flow 2 hat die Datei bereits verschoben — Teams-Chat und `processed\` prüfen |
+| Output leer trotz Worker-Erfolg | `Outputdatei erstellt` im Log, Datei nirgends | `show-request <id>` ausführen; Flow-2-Verlauf prüfen; `processed\input` ist nur für Inputs |
 | Erneuter Test klappt nicht | Gleiche `requestId` wie zuvor | Neue ID verwenden: `test-002`, `test-003`, … |
 | Zweite Instanz | `Eine andere Instanz läuft bereits` | Erste Instanz beenden oder `data\worker.lock` löschen (nur wenn keine Instanz läuft) |
 | Keine Verarbeitung | Worker läuft, nichts passiert | `list-pending` prüfen, Logdatei lesen |

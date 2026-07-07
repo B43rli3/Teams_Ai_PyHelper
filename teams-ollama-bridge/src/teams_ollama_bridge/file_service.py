@@ -143,8 +143,9 @@ def output_path_for(output_dir: Path, request_id: str) -> Path:
 
 def write_output_response(output_dir: Path, response: OutputResponse) -> Path:
     """Response-JSON atomar und exklusiv im Outputordner erstellen."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    final_path = output_dir / output_filename_for(response.request_id)
+    resolved_output_dir = Path(output_dir).resolve()
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    final_path = resolved_output_dir / output_filename_for(response.request_id)
 
     if final_path.exists():
         raise OutputFileExistsError(
@@ -158,6 +159,7 @@ def write_output_response(output_dir: Path, response: OutputResponse) -> Path:
     )
     encoded = payload.encode("utf-8")
 
+    # Zuerst vollständig außerhalb von OneDrive schreiben (System-Temp)
     with tempfile.NamedTemporaryFile(
         mode="wb",
         dir=tempfile.gettempdir(),
@@ -166,33 +168,45 @@ def write_output_response(output_dir: Path, response: OutputResponse) -> Path:
         delete=False,
     ) as tmp:
         tmp.write(encoded)
+        tmp.flush()
+        os.fsync(tmp.fileno())
         tmp_path = Path(tmp.name)
 
+    tmp_moved = False
     try:
-        fd = os.open(
-            str(final_path),
-            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-        )
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(encoded)
-        except Exception:
-            os.close(fd)
-            raise
+        shutil.move(str(tmp_path), str(final_path))
+        tmp_moved = True
+
+        if not final_path.exists():
+            raise FilePermissionError(
+                f"Outputdatei fehlt nach dem Schreiben: {final_path}"
+            )
+
+        size = final_path.stat().st_size
+        if size == 0:
+            raise FilePermissionError(
+                f"Outputdatei ist leer: {final_path}"
+            )
+
+        read_json_file(final_path)
+
     except FileExistsError as exc:
-        tmp_path.unlink(missing_ok=True)
         raise OutputFileExistsError(
             f"Outputdatei existiert bereits: {final_path.name}"
         ) from exc
     except OSError as exc:
-        tmp_path.unlink(missing_ok=True)
         raise FilePermissionError(
-            f"Outputdatei kann nicht erstellt werden: {final_path.name}"
+            f"Outputdatei kann nicht erstellt werden: {final_path}"
         ) from exc
     finally:
-        tmp_path.unlink(missing_ok=True)
+        if not tmp_moved:
+            tmp_path.unlink(missing_ok=True)
 
-    logger.info("Outputdatei erstellt: %s", final_path)
+    logger.info(
+        "Outputdatei erstellt: %s (%d Bytes)",
+        final_path,
+        final_path.stat().st_size,
+    )
     return final_path
 
 

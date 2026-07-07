@@ -14,6 +14,7 @@ from teams_ollama_bridge.exceptions import (
     ConfigurationError,
     InstanceAlreadyRunningError,
 )
+from teams_ollama_bridge.file_service import output_path_for
 from teams_ollama_bridge.logging_config import get_logger, setup_logging
 from teams_ollama_bridge.models import ProcessorMode
 from teams_ollama_bridge.repository import RequestRepository
@@ -234,6 +235,58 @@ def cmd_retry_failed(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_show_request(args: argparse.Namespace) -> int:
+    """Status eines Requests anzeigen und Output-Datei suchen."""
+    try:
+        settings = load_settings()
+        _init_logging(settings)
+        repo = RequestRepository(settings.database_path)
+        record = repo.get(args.request_id)
+        if record is None:
+            print(f"Request '{args.request_id}' nicht in SQLite gefunden.")
+            return 1
+
+        print(f"=== Request: {record.request_id} ===\n")
+        print(f"Status:              {record.status.value}")
+        print(f"Input-Datei:         {record.input_filename or '-'}")
+        print(f"Output-Dateiname:    {record.output_filename or '-'}")
+        print(f"Modell:              {record.model or '-'}")
+        print(f"Dauer:               {record.processing_duration_ms or '-'} ms")
+        print(f"Erstellt:            {record.created_at or '-'}")
+        print(f"Abgeschlossen:       {record.completed_at or '-'}")
+        if record.error_message:
+            print(f"Fehler:              {record.error_message}")
+
+        output_name = record.output_filename or f"response_{args.request_id}.json"
+        if settings.output_dir:
+            expected = output_path_for(settings.output_dir, args.request_id)
+            print("\nErwarteter Output-Pfad:")
+            print(f"  {expected}")
+            print(f"  Vorhanden: {'Ja' if expected.exists() else 'Nein'}")
+            if expected.exists():
+                print(f"  Größe: {expected.stat().st_size} Bytes")
+
+        if settings.teams_llm_root and settings.teams_llm_root.exists():
+            print(f"\nSuche '{output_name}' unter {settings.teams_llm_root} ...")
+            matches = list(settings.teams_llm_root.rglob(output_name))
+            if matches:
+                print("Gefunden:")
+                for match in matches:
+                    print(f"  {match}")
+            else:
+                print("  Nicht gefunden.")
+                print(
+                    "\nHinweis: Wenn der Worker 'Outputdatei erstellt' meldet, die Datei "
+                    "aber fehlt, hat Flow 2 sie möglicherweise bereits verschoben "
+                    "(ggf. in einen anderen Ordner als processed\\input) oder im "
+                    "Fehlerzweig verarbeitet."
+                )
+        return 0
+    except ConfigurationError as exc:
+        print(f"Konfigurationsfehler: {exc.user_message}", file=sys.stderr)
+        return 1
+
+
 def cmd_discover_onedrive(_args: argparse.Namespace) -> int:
     print("=== OneDrive-Pfad-Erkennung ===\n")
     paths = discover_onedrive_paths()
@@ -282,6 +335,11 @@ def build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true", help="Sicherheitsabfrage überspringen"
     )
 
+    show_parser = subparsers.add_parser(
+        "show-request", help="Request-Status anzeigen und Output-Datei suchen"
+    )
+    show_parser.add_argument("request_id", help="requestId, z. B. test-001")
+
     subparsers.add_parser(
         "discover-onedrive", help="Mögliche lokale OneDrive-Pfade anzeigen"
     )
@@ -299,6 +357,7 @@ def main() -> None:
         "process-file": cmd_process_file,
         "list-pending": cmd_list_pending,
         "retry-failed": cmd_retry_failed,
+        "show-request": cmd_show_request,
         "discover-onedrive": cmd_discover_onedrive,
     }
     handler = commands[args.command]
