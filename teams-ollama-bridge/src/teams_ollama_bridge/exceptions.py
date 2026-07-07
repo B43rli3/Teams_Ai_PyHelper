@@ -1,0 +1,80 @@
+"""Benutzerdefinierte Ausnahmen für teams-ollama-bridge."""
+
+from __future__ import annotations
+
+
+class BridgeError(Exception):
+    """Basisklasse für Anwendungsfehler."""
+
+    def __init__(self, message: str, error_type: str | None = None) -> None:
+        super().__init__(message)
+        self.error_type = error_type or self.__class__.__name__
+        self.user_message = message
+
+
+class ConfigurationError(BridgeError):
+    """Konfigurationsfehler beim Start."""
+
+
+class InvalidJsonError(BridgeError):
+    """Ungültiges JSON in einer Inputdatei."""
+
+
+class InvalidInputSchemaError(BridgeError):
+    """Input-JSON entspricht nicht dem erwarteten Schema."""
+
+
+class EmptyMessageError(BridgeError):
+    """Nachricht ist nach Bereinigung leer."""
+
+
+class MessageTooLongError(BridgeError):
+    """Nachricht überschreitet die maximale Länge."""
+
+
+class DuplicateRequestError(BridgeError):
+    """Request wurde bereits erfolgreich verarbeitet."""
+
+
+class RequestContentMismatchError(BridgeError):
+    """Gleiche requestId mit abweichendem Dateiinhalt."""
+
+
+class OutputFileExistsError(BridgeError):
+    """Outputdatei existiert bereits."""
+
+
+class OllamaConnectionError(BridgeError):
+    """Ollama ist nicht erreichbar."""
+
+
+class OllamaTimeoutError(BridgeError):
+    """Ollama-Anfrage hat das Zeitlimit überschritten."""
+
+
+class OllamaResponseError(BridgeError):
+    """Ungültige oder leere Ollama-Antwort."""
+
+
+class FileNotStableError(BridgeError):
+    """Datei ist noch nicht vollständig synchronisiert."""
+
+
+class FilePermissionError(BridgeError):
+    """Fehlende Berechtigung für Dateioperationen."""
+
+
+class SQLiteError(BridgeError):
+    """Fehler bei SQLite-Operationen."""
+
+
+class TemporaryProcessingError(BridgeError):
+    """Vorübergehender Fehler, der einen Retry rechtfertigt."""
+
+
+class PermanentProcessingError(BridgeError):
+    """Dauerhafter Fehler ohne weiteren Retry."""
+
+
+class InstanceAlreadyRunningError(BridgeError):
+    """Eine andere Instanz läuft bereits."""
