@@ -394,49 +394,77 @@ Der Worker läuft jetzt dauerhaft. **Fenster offen lassen.**
 
 ### Schritt 2 — Test-Inputdatei erstellen
 
-Öffnen Sie ein **zweites** PowerShell-Fenster und erstellen Sie eine Testdatei im Inputordner:
+Öffnen Sie ein **zweites** PowerShell-Fenster.
+
+> **Wichtig — richtiger Ordner:** Die JSON-Datei muss in den Unterordner **`input`** gelegt werden, **nicht** direkt in `TeamsLLM`!
+>
+> | Falsch | Richtig |
+> |--------|---------|
+> | `...\TeamsLLM\request_test-001.json` | `...\TeamsLLM\input\request_test-001.json` |
+>
+> Der Worker überwacht ausschließlich den `input`-Ordner (siehe `input_dir` in der Worker-Konfiguration).
+
+Pfade an Ihre Umgebung anpassen und Testdatei erstellen:
 
 ```powershell
-$inputDir = "C:\Users\Max.Mustermann\OneDrive - MeineFirma GmbH\TeamsLLM\input"
+# Basisordner (entspricht TEAMS_LLM_ROOT in .env)
+$teamsRoot = "C:\Users\nuern\OneDrive - Strabag BRVZ GmbH\TeamsLLM"
 
+# WICHTIG: immer den input-Unterordner verwenden!
+$inputDir = "$teamsRoot\input"
+$outputDir = "$teamsRoot\output"
+
+# Input-Ordner anlegen, falls noch nicht vorhanden
+New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
+
+# Für jeden neuen Test eine neue requestId verwenden (z. B. test-002, test-003)
 @'
 {
-  "requestId": "test-001",
+  "requestId": "test-002",
   "messageId": "1783415721396",
   "chatId": "19:meeting_test@thread.v2",
   "sender": "Lokaler Test",
   "message": "Dies ist ein Test.",
   "createdAt": "2026-07-07T09:15:22.6932048Z"
 }
-'@ | Out-File -FilePath "$inputDir\request_test-001.json" -Encoding utf8
+'@ | Out-File -FilePath "$inputDir\request_test-002.json" -Encoding utf8
+
+# Kurz prüfen, ob die Datei am richtigen Ort liegt
+Get-Item "$inputDir\request_test-002.json"
 ```
 
-> Alternativ: Datei manuell im Explorer erstellen und in den `input`-Ordner kopieren.
+> **Häufiger Fehler:** `$inputDir = "...\TeamsLLM"` ohne `\input` — dann passiert im Worker **nichts**.
+
+> **Alternativ:** Datei manuell im Explorer erstellen und in den Ordner `TeamsLLM\input\` kopieren.
 
 ### Schritt 3 — Verarbeitung beobachten
 
 Im Worker-Fenster sollten nach wenigen Sekunden Meldungen erscheinen:
 
 ```
-[INFO] ... Verarbeite Datei: request_test-001.json
-[INFO] ... Outputdatei erstellt: response_test-001.json
-[INFO] ... Request test-001 erfolgreich verarbeitet (10ms, Modus=mock)
-[INFO] ... Datei archiviert: request_test-001.json -> ...
+[INFO] ... Verarbeite Datei: request_test-002.json
+[INFO] ... Outputdatei erstellt: C:\...\TeamsLLM\output\response_test-002.json
+[INFO] ... Request test-002 erfolgreich verarbeitet (10ms, Modus=mock)
+[INFO] ... Datei archiviert: request_test-002.json -> C:\...\TeamsLLM\processed\input\...
 ```
+
+Wenn diese Meldungen erscheinen, war die Verarbeitung **erfolgreich** — auch wenn die Outputdatei im Explorer kurz danach nicht mehr sichtbar ist (siehe Schritt 4).
 
 ### Schritt 4 — Ergebnis prüfen
 
-**Outputdatei** (im `output`-Ordner):
+**Sofort nach der Verarbeitung** (am besten innerhalb weniger Sekunden):
 
 ```powershell
-Get-Content "C:\...\TeamsLLM\output\response_test-001.json"
+$teamsRoot = "C:\Users\nuern\OneDrive - Strabag BRVZ GmbH\TeamsLLM"
+Get-ChildItem "$teamsRoot\output\"
+Get-Content "$teamsRoot\output\response_test-002.json"
 ```
 
 Erwarteter Inhalt:
 
 ```json
 {
-  "requestId": "test-001",
+  "requestId": "test-002",
   "messageId": "1783415721396",
   "chatId": "19:meeting_test@thread.v2",
   "answer": "PoC erfolgreich. Die lokale Python-Anwendung hat folgende Nachricht verarbeitet: Dies ist ein Test.",
@@ -447,11 +475,40 @@ Erwarteter Inhalt:
 }
 ```
 
-**Archivierte Inputdatei:**
+#### Output-Ordner ist leer — trotzdem Erfolg?
+
+Wenn der Worker Meldungen wie `Outputdatei erstellt` und `erfolgreich verarbeitet` zeigt, die Datei im `output`-Ordner aber **fehlt**, ist das oft **normal**:
+
+| Ursache | Erklärung |
+|---------|-----------|
+| **Power Automate Flow 2 ist aktiv** | Flow 2 reagiert auf neue `response_*.json`-Dateien, veröffentlicht die Antwort in Teams und **verschiebt die Datei aus `output`** in einen `processed`-Bereich. Der Output-Ordner ist danach leer — das ist gewollt. |
+| **OneDrive-Synchronisierung** | Die Datei wurde lokal erstellt und sofort in die Cloud synchronisiert; Flow 2 greift nach dem Sync zu. |
+| **Erneuter Test mit gleicher requestId** | `test-001` wurde bereits verarbeitet (steht in SQLite). Für neue Tests `test-002`, `test-003` usw. verwenden. |
+
+**Erfolg prüfen, wenn Flow 2 aktiv ist:**
+
+1. **Teams-Chat prüfen** — Mock-Antwort sollte dort erscheinen:
+   > PoC erfolgreich. Die lokale Python-Anwendung hat folgende Nachricht verarbeitet: …
+
+2. **Archivierte Inputdatei prüfen** (wird von Python verschoben):
 
 ```powershell
-Get-ChildItem "C:\...\TeamsLLM\processed\input\"
+Get-ChildItem "C:\Users\nuern\OneDrive - Strabag BRVZ GmbH\TeamsLLM\processed\input\"
 ```
+
+3. **Response-Archiv von Flow 2 prüfen** — je nach Flow-Konfiguration z. B.:
+
+```powershell
+Get-ChildItem "C:\Users\nuern\OneDrive - Strabag BRVZ GmbH\TeamsLLM\processed\" -Recurse
+```
+
+4. **Logdatei prüfen** (zeigt den vollständigen Output-Pfad):
+
+```powershell
+Get-Content .\logs\teams-ollama-bridge.log -Tail 20
+```
+
+**Erfolg ohne Flow 2:** Die Datei `response_<requestId>.json` bleibt im `output`-Ordner liegen, bis Flow 2 oder Sie sie manuell entfernen.
 
 Die Originaldatei sollte **nicht mehr** im `input`-Ordner liegen.
 
@@ -914,6 +971,9 @@ Nach einem Neustart des Workers oder PCs:
 | Problem | Symptom | Lösung |
 |---------|---------|--------|
 | Projektordner fehlt nach Clone | `teams-ollama-bridge` nicht gefunden | `git pull origin main` im geklonten Repo ausführen |
+| Testdatei im falschen Ordner | Worker reagiert nicht | Datei muss in `TeamsLLM\input\` liegen, **nicht** direkt in `TeamsLLM\` |
+| Output leer trotz Worker-Erfolg | `Outputdatei erstellt` im Log, aber `output\` leer | Flow 2 hat die Datei bereits verschoben — Teams-Chat und `processed\` prüfen |
+| Erneuter Test klappt nicht | Gleiche `requestId` wie zuvor | Neue ID verwenden: `test-002`, `test-003`, … |
 | Zweite Instanz | `Eine andere Instanz läuft bereits` | Erste Instanz beenden oder `data\worker.lock` löschen (nur wenn keine Instanz läuft) |
 | Keine Verarbeitung | Worker läuft, nichts passiert | `list-pending` prüfen, Logdatei lesen |
 | Fehlgeschlagene Requests | Status `failed` in SQLite | Ursache beheben, dann `retry-failed` |

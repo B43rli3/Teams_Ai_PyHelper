@@ -192,7 +192,7 @@ def write_output_response(output_dir: Path, response: OutputResponse) -> Path:
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    logger.info("Outputdatei erstellt: %s", final_path.name)
+    logger.info("Outputdatei erstellt: %s", final_path)
     return final_path
 
 
