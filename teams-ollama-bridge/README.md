@@ -106,7 +106,27 @@ Bevor Sie starten, sollten folgende Komponenten **bereits funktionieren**:
 
 ```powershell
 git clone https://github.com/B43rli3/Teams_Ai_PyHelper.git
-cd Teams_Ai_PyHelper\teams-ollama-bridge
+cd Teams_Ai_PyHelper
+```
+
+**Struktur prüfen** — der Projektordner muss vorhanden sein:
+
+```powershell
+dir teams-ollama-bridge
+```
+
+Erwartung: Ordner `teams-ollama-bridge` mit Unterordnern `src`, `scripts`, `tests` usw.
+
+Falls der Ordner **fehlt**, Repository aktualisieren:
+
+```powershell
+git pull origin main
+```
+
+Danach in den Projektordner wechseln:
+
+```powershell
+cd teams-ollama-bridge
 ```
 
 **Option B: ZIP-Archiv**
@@ -893,6 +913,7 @@ Nach einem Neustart des Workers oder PCs:
 
 | Problem | Symptom | Lösung |
 |---------|---------|--------|
+| Projektordner fehlt nach Clone | `teams-ollama-bridge` nicht gefunden | `git pull origin main` im geklonten Repo ausführen |
 | Zweite Instanz | `Eine andere Instanz läuft bereits` | Erste Instanz beenden oder `data\worker.lock` löschen (nur wenn keine Instanz läuft) |
 | Keine Verarbeitung | Worker läuft, nichts passiert | `list-pending` prüfen, Logdatei lesen |
 | Fehlgeschlagene Requests | Status `failed` in SQLite | Ursache beheben, dann `retry-failed` |
