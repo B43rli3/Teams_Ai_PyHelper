@@ -158,11 +158,19 @@ Falls Python nicht gefunden wird:
 
 Im Projektordner `teams-ollama-bridge`:
 
+**Empfohlen auf Firmen-PCs (Arbeitsrechner):** `.cmd`-Dateien — keine PowerShell-Signatur nötig:
+
+```powershell
+.\scripts\setup.cmd
+```
+
+**Alternativ:** PowerShell-Skripte (auf privaten PCs oder wenn Ausführungsrichtlinie es erlaubt):
+
 ```powershell
 .\scripts\setup.ps1
 ```
 
-Das Skript führt automatisch aus:
+Das Setup führt automatisch aus:
 
 | Schritt | Aktion |
 |---------|--------|
@@ -176,20 +184,44 @@ Das Skript führt automatisch aus:
 ```
 === Naechste Schritte ===
 1. Bearbeiten Sie .env und setzen Sie TEAMS_LLM_ROOT auf Ihren OneDrive-Pfad.
-2. Fuehren Sie die Konfigurationspruefung aus: .\check.ps1
-3. Starten Sie den Worker im Mock-Modus: .\start.ps1
+2. Konfigurationspruefung: scripts\check.cmd
+3. Worker starten: scripts\start.cmd
 4. Testen Sie mit einer Input-JSON im Inputordner.
 ```
 
-### Schritt 4 — Ausführungsrichtlinie (falls Setup blockiert wird)
+### Schritt 4 — PowerShell blockiert? (Firmen-PC / AllSigned)
 
-Falls PowerShell das Skript blockiert:
+Auf vielen **Arbeitsrechnern** gilt eine strenge Ausführungsrichtlinie (`AllSigned`). Dann erscheint:
+
+```
+Die Datei ... setup.ps1 ist nicht digital signiert. Sie können dieses Skript im aktuellen System nicht ausführen.
+```
+
+**Lösung 1 — `.cmd` verwenden (empfohlen, keine Admin-Rechte):**
+
+```powershell
+.\scripts\setup.cmd
+.\scripts\check.cmd
+.\scripts\start.cmd
+```
+
+`.cmd`-Dateien unterliegen **nicht** der PowerShell-Ausführungsrichtlinie.
+
+**Lösung 2 — PowerShell einmalig mit Bypass:**
+
+```powershell
+.\scripts\run-ps1.cmd setup.ps1
+```
+
+**Lösung 3 — Ausführungsrichtlinie nur für Ihr Konto lockern** (falls IT das erlaubt):
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
-Danach `.\scripts\setup.ps1` erneut ausführen. Diese Einstellung gilt nur für Ihr Benutzerkonto und benötigt keine Administratorrechte.
+Danach `.\scripts\setup.ps1` erneut ausführen.
+
+> **Hinweis:** Die `.ps1`-Skripte im Repository sind absichtlich **nicht digital signiert**. Eine Signatur würde ein firmeninternes Code-Signing-Zertifikat erfordern. Für den Produktivbetrieb auf Firmen-PCs sind die `.cmd`-Alternativen vorgesehen.
 
 ---
 
@@ -814,13 +846,17 @@ Alle Befehle über die virtuelle Umgebung:
 | `retry-failed` | Fehlgeschlagene Requests zurücksetzen | Nach Fehlerbehebung |
 | `discover-onedrive` | OneDrive-Pfade aus Umgebungsvariablen anzeigen | Ersteinrichtung |
 
-**PowerShell-Shortcuts** (im Projektordner):
+**Skript-Shortcuts** (im Projektordner):
 
-| Skript | Entspricht |
-|--------|------------|
-| `.\scripts\start.ps1` | `run` |
-| `.\scripts\run_once.ps1` | `once` |
-| `.\scripts\check.ps1` | `check` |
+| Aufgabe | Firmen-PC (`.cmd`) | PowerShell (`.ps1`) | CLI-Befehl |
+|---------|-------------------|---------------------|------------|
+| Setup | `.\scripts\setup.cmd` | `.\scripts\setup.ps1` | — |
+| Worker starten | `.\scripts\start.cmd` | `.\scripts\start.ps1` | `run` |
+| Einmal verarbeiten | `.\scripts\run_once.cmd` | `.\scripts\run_once.ps1` | `once` |
+| Konfiguration prüfen | `.\scripts\check.cmd` | `.\scripts\check.ps1` | `check` |
+| Tests | `.\scripts\test.cmd` | `.\scripts\test.ps1` | — |
+
+> Auf Arbeitsrechnern mit `AllSigned`-Richtlinie immer die **`.cmd`**-Variante verwenden.
 
 ---
 
@@ -1003,7 +1039,7 @@ Nach einem Neustart des Workers oder PCs:
 
 | Problem | Symptom | Lösung |
 |---------|---------|--------|
-| Projektordner fehlt nach Clone | `teams-ollama-bridge` nicht gefunden | `git pull origin main` im geklonten Repo ausführen |
+| PowerShell blockiert `.ps1` | `nicht digital signiert` / `UnauthorizedAccess` | `.\scripts\setup.cmd` statt `setup.ps1` verwenden |
 | Testdatei im falschen Ordner | Worker reagiert nicht | Datei muss in `TeamsLLM\input\` liegen, **nicht** direkt in `TeamsLLM\` |
 | Output leer trotz Worker-Erfolg | `Outputdatei erstellt` im Log, Datei nirgends | `show-request <id>` ausführen; Flow-2-Verlauf prüfen; `processed\input` ist nur für Inputs |
 | Erneuter Test klappt nicht | Gleiche `requestId` wie zuvor | Neue ID verwenden: `test-002`, `test-003`, … |

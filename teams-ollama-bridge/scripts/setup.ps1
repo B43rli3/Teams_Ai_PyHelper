@@ -35,6 +35,6 @@ if (-not (Test-Path ".env")) {
 Write-Host ""
 Write-Host "=== Naechste Schritte ===" -ForegroundColor Cyan
 Write-Host "1. Bearbeiten Sie .env und setzen Sie TEAMS_LLM_ROOT auf Ihren OneDrive-Pfad."
-Write-Host "2. Fuehren Sie die Konfigurationspruefung aus: .\scripts\check.ps1"
-Write-Host "3. Starten Sie den Worker im Mock-Modus: .\scripts\start.ps1"
+Write-Host "2. Fuehren Sie die Konfigurationspruefung aus: .\scripts\check.cmd  (oder check.ps1)"
+Write-Host "3. Starten Sie den Worker im Mock-Modus: .\scripts\start.cmd  (oder start.ps1)"
 Write-Host "4. Testen Sie mit einer Input-JSON im Inputordner."
