@@ -78,3 +78,27 @@ class PermanentProcessingError(BridgeError):
 
 class InstanceAlreadyRunningError(BridgeError):
     """Eine andere Instanz läuft bereits."""
+
+
+class AttachmentPathError(BridgeError):
+    """Unsicherer oder ungültiger Attachment-Pfad."""
+
+
+class AttachmentNotSyncedError(TemporaryProcessingError):
+    """Attachment-Datei ist noch nicht lokal synchronisiert."""
+
+
+class AttachmentTooLargeError(BridgeError):
+    """Attachment überschreitet die maximale Größe."""
+
+
+class UnsupportedAttachmentTypeError(BridgeError):
+    """Dateityp ist nicht erlaubt oder nicht unterstützt."""
+
+
+class EncryptedPdfError(BridgeError):
+    """PDF ist verschlüsselt und kann nicht gelesen werden."""
+
+
+class AttachmentExtractionError(BridgeError):
+    """Fehler bei der Textextraktion aus einem Attachment."""

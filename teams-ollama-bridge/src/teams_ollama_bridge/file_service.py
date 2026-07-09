@@ -210,6 +210,21 @@ def write_output_response(output_dir: Path, response: OutputResponse) -> Path:
     return final_path
 
 
+def move_attachments_to_archive(paths: list[Path], archive_dir: Path) -> list[Path]:
+    """Attachment-Dateien in processed/input/files archivieren."""
+    if not paths:
+        return []
+    target_dir = archive_dir / "files"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    moved: list[Path] = []
+    for source in paths:
+        if not source.exists():
+            continue
+        destination = move_to_archive(source, target_dir)
+        moved.append(destination)
+    return moved
+
+
 def move_to_archive(source: Path, target_dir: Path) -> Path:
     """Datei in Archivordner verschieben ohne Überschreiben."""
     target_dir.mkdir(parents=True, exist_ok=True)

@@ -21,16 +21,17 @@ Die Anwendung läuft dauerhaft auf einem Windows-PC, überwacht einen lokal sync
 9. [Schritt-für-Schritt: Umstellung auf Ollama](#schritt-für-schritt-umstellung-auf-ollama)
 10. [Schritt-für-Schritt: Windows-Autostart](#schritt-für-schritt-windows-autostart)
 11. [Verbindung zu den Power-Automate-Flows](#verbindung-zu-den-power-automate-flows)
-12. [Input- und Outputformat](#input--und-outputformat)
-13. [CLI-Befehle](#cli-befehle)
-14. [Konfigurationsreferenz](#konfigurationsreferenz)
-15. [Logging](#logging)
-16. [SQLite-Status und Archivierung](#sqlite-status-und-archivierung)
-17. [Fehlerbehandlung und Neustartverhalten](#fehlerbehandlung-und-neustartverhalten)
-18. [Typische Probleme](#typische-probleme)
-19. [Datenschutz](#datenschutz)
-20. [Tests ausführen](#tests-ausführen)
-21. [Zukünftige Erweiterungen](#zukünftige-erweiterungen)
+12. [Dateianhänge aus dem aktuellen Power-Automate-PoC](#dateianhänge-aus-dem-aktuellen-power-automate-poc)
+13. [Input- und Outputformat](#input--und-outputformat)
+14. [CLI-Befehle](#cli-befehle)
+15. [Konfigurationsreferenz](#konfigurationsreferenz)
+16. [Logging](#logging)
+17. [SQLite-Status und Archivierung](#sqlite-status-und-archivierung)
+18. [Fehlerbehandlung und Neustartverhalten](#fehlerbehandlung-und-neustartverhalten)
+19. [Typische Probleme](#typische-probleme)
+20. [Datenschutz](#datenschutz)
+21. [Tests ausführen](#tests-ausführen)
+22. [Zukünftige Erweiterungen](#zukünftige-erweiterungen)
 
 ---
 
@@ -770,6 +771,112 @@ Die Python-Anwendung kennt diese Flows nicht — sie arbeitet nur mit lokalen Da
 
 ---
 
+## Dateianhänge aus dem aktuellen Power-Automate-PoC
+
+Neben reinen Textnachrichten kann Flow 1 Dateianhänge in den lokal synchronisierten Inputordner kopieren. Die Python-Anwendung liest diese Dateien **ausschließlich lokal** — es gibt keine Microsoft-Graph-Anbindung und keinen Download aus Teams, SharePoint oder fremden OneDrives.
+
+### Unterstützter aktueller PoC
+
+1. Flow 1 kopiert Dateien nach `TeamsLLM\input\files\`
+2. Die Request-JSON enthält `attachments[].localPath` (relativer Pfad unterhalb des Inputordners)
+3. Python löst den Pfad sicher auf, extrahiert den Inhalt und übergibt ihn zusammen mit der Teams-Frage an das LLM (oder den Mock-Modus)
+4. Nach erfolgreicher Verarbeitung werden Request-JSON und zugehörige Dateien archiviert
+
+### Einschränkung im aktuellen PoC
+
+Im aktuellen PoC funktioniert das zuverlässig nur für Dateien, die **vom Flow-Konto selbst in Teams hochgeladen** wurden. Dateien anderer Kollegen liegen häufig in deren OneDrive und können durch Flow 1 nicht zuverlässig kopiert werden. Dafür ist später Microsoft Graph vorgesehen.
+
+### Unterstützte Dateitypen
+
+| Typ | Endungen | Verarbeitung |
+|-----|----------|--------------|
+| Text | `.txt`, `.md`, `.csv` | Direktes Einlesen (UTF-8, UTF-8-BOM, Fallback cp1252) |
+| PDF | `.pdf` | Textextraktion mit PyMuPDF (kein OCR) |
+| Word | `.docx` | Absätze und Tabellen |
+| Excel | `.xlsx` | Zellwerte (keine Formelausführung) |
+| Bilder | `.png`, `.jpg`, `.jpeg`, `.webp` | Metadaten (Standard) oder optional Ollama-Vision |
+
+### Beispiel-Input-JSON mit Attachments
+
+```json
+{
+  "requestId": "75d434c8-d025-4afb-a767-9a0b62d18c3b",
+  "messageId": "1783415721396",
+  "chatId": "19:meeting_...@thread.v2",
+  "sender": "Christian Nuernberger",
+  "message": "Bitte fasse die angehängte Datei kurz zusammen.",
+  "createdAt": "2026-07-07T09:15:22.6932048Z",
+  "attachments": [
+    {
+      "name": "Test-pdf_4.pdf",
+      "contentType": "reference",
+      "contentUrl": "https://...",
+      "localPath": "files/75d434c8-d025-4afb-a767-9a0b62d18c3b_Test-pdf_4.pdf"
+    }
+  ]
+}
+```
+
+Wenn Flow 1 eine Datei nicht kopieren konnte:
+
+```json
+{
+  "name": "Test-pdf_4.pdf",
+  "localPath": "",
+  "status": "not_copied",
+  "error": "Die Datei konnte vom Flow nicht aus OneDrive gelesen werden."
+}
+```
+
+### Beispiel-OneDrive-Ordnerstruktur
+
+```
+TeamsLLM\
+  input\
+    request_75d434c8-d025-4afb-a767-9a0b62d18c3b.json
+    files\
+      75d434c8-d025-4afb-a767-9a0b62d18c3b_Test-pdf_4.pdf
+  output\
+    response_75d434c8-d025-4afb-a767-9a0b62d18c3b.json
+  processed\
+    input\
+      request_75d434c8-d025-4afb-a767-9a0b62d18c3b.json
+      files\
+        75d434c8-d025-4afb-a767-9a0b62d18c3b_Test-pdf_4.pdf
+```
+
+### Beispiel-Testablauf in Teams
+
+1. Datei selbst in Teams hochladen
+2. `/ai Bitte fasse die angehängte Datei zusammen` senden
+3. Flow 1 kopiert die Datei nach `input\files\` und erzeugt die Request-JSON
+4. Python extrahiert den Dateiinhalt und beantwortet die Frage
+5. Flow 2 veröffentlicht die Antwort in Teams
+
+### Debug-Befehl
+
+Attachments ohne LLM-Aufruf und ohne Archivierung prüfen:
+
+```powershell
+.\.venv\Scripts\python.exe -m teams_ollama_bridge inspect-attachments "C:\Pfad\zu\request_test.json"
+```
+
+Der Befehl listet Attachments auf, löst lokale Pfade auf, prüft Dateigröße und Stabilität und führt eine Testextraktion aus.
+
+### Typische Fehler bei Attachments
+
+| Symptom | Ursache | Hinweis |
+|---------|---------|---------|
+| Request wird wiederholt übersprungen | Datei noch nicht lokal synchronisiert | OneDrive-Sync abwarten; `FILE_STABLE_SECONDS` prüfen |
+| `localPath` leer | Flow konnte Datei nicht kopieren | Nur selbst hochgeladene Dateien im aktuellen PoC |
+| Datei zu groß | `ATTACHMENTS_MAX_FILE_SIZE_MB` überschritten | Grenzwert in `.env` anpassen oder Datei verkleinern |
+| Dateityp nicht erlaubt | Endung nicht in `ATTACHMENTS_ALLOWED_EXTENSIONS` | Erlaubte Endungen prüfen |
+| PDF ohne Text | Gescanntes PDF ohne extrahierbaren Text | Kein OCR — anderes Format verwenden |
+| Bildbeschreibung fehlgeschlagen | Vision-Modell nicht verfügbar | `IMAGE_PROCESSING_MODE=metadata` oder passendes Modell installieren |
+| Kollegen-Datei | Datei liegt in fremdem OneDrive | Aktueller PoC unterstützt das nicht — Graph geplant |
+
+---
+
 ## Input- und Outputformat
 
 ### Input (von Flow 1)
@@ -793,6 +900,18 @@ Die Python-Anwendung kennt diese Flows nicht — sie arbeitet nur mit lokalen Da
 | `message` | Ja | Nachrichtentext (ohne `/ai`-Prefix) |
 | `sender` | Nein | Absendername |
 | `createdAt` | Nein | ISO-8601-Zeitstempel |
+| `attachments` | Nein | Liste angehängter Dateien (siehe [Dateianhänge](#dateianhänge-aus-dem-aktuellen-power-automate-poc)) |
+
+Jedes Attachment-Objekt kann folgende Felder enthalten:
+
+| Feld | Beschreibung |
+|------|--------------|
+| `name` | Dateiname |
+| `contentType` | Optional, z. B. `reference` |
+| `contentUrl` | Optional, Teams-Referenz-URL |
+| `localPath` | Relativer Pfad unterhalb des Inputordners, z. B. `files/<requestId>_datei.pdf` |
+| `status` | Optional, z. B. `not_copied` wenn Flow die Datei nicht kopieren konnte |
+| `error` | Optional, Fehlermeldung vom Flow |
 
 ### Output (für Flow 2)
 
@@ -822,6 +941,28 @@ Dateiname: `response_<requestId>.json`
 | `model` | Nein | Verwendetes Modell |
 | `processingDurationMs` | Nein | Verarbeitungsdauer in ms |
 | `error` | Nein | Nur bei `status: failed` |
+| `attachmentsProcessed` | Nein | Optional: Verarbeitungsstatus je Attachment (Flow 2 ignoriert dieses Feld) |
+
+Beispiel mit `attachmentsProcessed`:
+
+```json
+{
+  "requestId": "75d434c8-d025-4afb-a767-9a0b62d18c3b",
+  "messageId": "1783415721396",
+  "chatId": "19:meeting_...@thread.v2",
+  "answer": "Kurze Zusammenfassung der PDF …",
+  "status": "completed",
+  "processedAt": "2026-07-07T09:30:00Z",
+  "attachmentsProcessed": [
+    {
+      "name": "Test-pdf_4.pdf",
+      "status": "processed",
+      "kind": "document",
+      "extractedCharacters": 12345
+    }
+  ]
+}
+```
 
 > **Wichtig:** Nur `status: completed` wird von Flow 2 als Teams-Nachricht veröffentlicht.
 
@@ -843,6 +984,7 @@ Alle Befehle über die virtuelle Umgebung:
 | `process-file "C:\Pfad\datei.json"` | Einzelne Datei verarbeiten | Debugging |
 | `list-pending` | Offene und fehlgeschlagene Requests auflisten | Statusprüfung |
 | `show-request <requestId>` | Request-Status und Output-Dateisuche | Wenn Output-Datei fehlt |
+| `inspect-attachments "C:\Pfad\request.json"` | Attachments debuggen (ohne LLM/Archivierung) | PoC-Debugging für Dateianhänge |
 | `retry-failed` | Fehlgeschlagene Requests zurücksetzen | Nach Fehlerbehebung |
 | `discover-onedrive` | OneDrive-Pfade aus Umgebungsvariablen anzeigen | Ersteinrichtung |
 
@@ -898,6 +1040,25 @@ Vollständige Vorlage: `.env.example`
 | `LLM_MAX_INPUT_CHARACTERS` | `12000` | Maximale Eingabelänge |
 | `LLM_MAX_OUTPUT_CHARACTERS` | `20000` | Maximale Ausgabelänge |
 
+### Attachments und Bilder
+
+| Variable | Standard | Beschreibung |
+|----------|----------|--------------|
+| `ATTACHMENTS_ENABLED` | `true` | Attachment-Verarbeitung aktivieren |
+| `ATTACHMENTS_BASE_DIR` | (leer = `INPUT_DIR`) | Basisordner für `localPath`-Auflösung |
+| `ATTACHMENTS_MAX_FILES` | `3` | Maximale Anzahl Attachments pro Request |
+| `ATTACHMENTS_MAX_FILE_SIZE_MB` | `20` | Maximale Dateigröße je Attachment |
+| `ATTACHMENTS_MAX_EXTRACTED_CHARACTERS_PER_FILE` | `30000` | Max. extrahierte Zeichen je Datei |
+| `ATTACHMENTS_MAX_TOTAL_EXTRACTED_CHARACTERS` | `60000` | Max. extrahierte Zeichen gesamt |
+| `ATTACHMENTS_ALLOWED_EXTENSIONS` | siehe `.env.example` | Erlaubte Dateiendungen |
+| `ATTACHMENTS_INCLUDE_FILENAMES_IN_PROMPT` | `true` | Dateinamen im LLM-Kontext anzeigen |
+| `IMAGE_PROCESSING_MODE` | `metadata` | `metadata` oder `ollama_vision` |
+| `OLLAMA_VISION_MODEL` | `llava:latest` | Modell für Bildanalyse |
+| `OLLAMA_VISION_TIMEOUT_SECONDS` | `180` | Timeout für Vision-Aufruf |
+| `IMAGE_MAX_SIZE_MB` | `10` | Maximale Bildgröße |
+| `IMAGE_MAX_DIMENSION_PIXELS` | `8000` | Maximale Bildbreite/-höhe |
+| `IMAGE_ANALYSIS_PROMPT` | (siehe `.env.example`) | Prompt für Bildbeschreibung |
+
 ### Logging und Daten
 
 | Variable | Standard | Beschreibung |
@@ -928,12 +1089,15 @@ Vollständige Vorlage: `.env.example`
 - Verwendeter Modus und Modell
 - Retry-Versuche und Archivierung
 - Fehlerklassen
+- Attachment-Anzahl, Dateityp, Größe und Extraktionsstatus (ohne vollständige Inhalte)
 
 ### Was standardmäßig **nicht** geloggt wird
 
 - Vollständige Teams-Nachrichten
 - Vollständige LLM-Antworten
 - Vollständige Chat-IDs
+- Vollständige extrahierte Dateiinhalte
+- Absolute lokale Pfade und `contentUrl`-Werte
 
 Für lokale Entwicklung: `LOG_MESSAGE_CONTENT=true` in `.env` setzen.
 
@@ -963,8 +1127,8 @@ Pfad: `data\state.db` (im Projektordner, nicht in OneDrive)
 
 | Ergebnis | Zielordner |
 |----------|------------|
-| Erfolg | `<TEAMS_LLM_ROOT>\processed\input\` |
-| Fehler | `<TEAMS_LLM_ROOT>\error\input\` |
+| Erfolg | `<TEAMS_LLM_ROOT>\processed\input\` (inkl. `files\` für Attachments) |
+| Fehler | `<TEAMS_LLM_ROOT>\error\input\` (inkl. `files\` für Attachments) |
 
 Der **Outputordner** enthält ausschließlich finale `response_*.json`-Dateien. Temporäre oder archivierte Dateien werden dort **nicht** abgelegt.
 
@@ -1079,6 +1243,7 @@ Tests benötigen **kein** echtes Ollama und **kein** echtes OneDrive.
 
 ## Zukünftige Erweiterungen
 
+- Microsoft Graph für Dateianhänge anderer Kollegen
 - Gesprächskontext über mehrere Nachrichten hinweg
 - RAG (Retrieval-Augmented Generation) mit lokalen Dokumenten
 - Mehrere Modelle je nach Anfragetyp oder Chat

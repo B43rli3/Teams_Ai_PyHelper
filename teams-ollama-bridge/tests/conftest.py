@@ -24,6 +24,7 @@ def workspace(tmp_path: Path) -> Path:
 
   for directory in (input_dir, output_dir, processed_dir, failed_dir, data_dir, logs_dir):
     directory.mkdir(parents=True)
+  (input_dir / "files").mkdir(parents=True, exist_ok=True)
 
   return tmp_path
 
@@ -47,6 +48,7 @@ def settings(workspace: Path) -> Settings:
     log_message_content=False,
     llm_max_input_characters=12000,
     llm_max_output_characters=20000,
+    attachments_enabled=True,
   )
 
 

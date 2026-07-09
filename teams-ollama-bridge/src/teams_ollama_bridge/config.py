@@ -9,7 +9,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from teams_ollama_bridge.exceptions import ConfigurationError
-from teams_ollama_bridge.models import ProcessorMode
+from teams_ollama_bridge.models import ImageProcessingMode, ProcessorMode
 
 
 class Settings(BaseSettings):
@@ -54,6 +54,25 @@ class Settings(BaseSettings):
     llm_max_input_characters: int = 12000
     llm_max_output_characters: int = 20000
 
+    attachments_enabled: bool = True
+    attachments_base_dir: Path | None = Field(default=None, alias="ATTACHMENTS_BASE_DIR")
+    attachments_max_files: int = 3
+    attachments_max_file_size_mb: int = 20
+    attachments_max_extracted_characters_per_file: int = 30000
+    attachments_max_total_extracted_characters: int = 60000
+    attachments_allowed_extensions: str = ".txt,.md,.csv,.pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp"
+    attachments_include_filenames_in_prompt: bool = True
+
+    image_processing_mode: ImageProcessingMode = ImageProcessingMode.METADATA
+    ollama_vision_model: str = "llava:latest"
+    ollama_vision_timeout_seconds: float = 180.0
+    image_max_size_mb: int = 10
+    image_max_dimension_pixels: int = 8000
+    image_analysis_prompt: str = (
+        "Beschreibe den relevanten Inhalt dieses Bildes präzise auf Deutsch. "
+        "Wenn Text erkennbar ist, gib ihn sinngemäß wieder. Erfinde keine Details."
+    )
+
     database_path: Path = Path("data/state.db")
     lock_file_path: Path = Path("data/worker.lock")
 
@@ -70,6 +89,7 @@ class Settings(BaseSettings):
         "database_path",
         "lock_file_path",
         "log_file_path",
+        "attachments_base_dir",
         mode="before",
     )
     @classmethod
@@ -118,7 +138,31 @@ class Settings(BaseSettings):
                 )
             self.failed_input_dir = root / "error" / "input"
 
+        if self.attachments_base_dir is None and self.input_dir is not None:
+            self.attachments_base_dir = self.input_dir
+
         return self
+
+    @property
+    def attachments_max_file_size_bytes(self) -> int:
+        return self.attachments_max_file_size_mb * 1024 * 1024
+
+    @property
+    def parsed_allowed_extensions(self) -> set[str]:
+        return {
+            ext.strip().lower() if ext.strip().startswith(".") else f".{ext.strip().lower()}"
+            for ext in self.attachments_allowed_extensions.split(",")
+            if ext.strip()
+        }
+
+    @property
+    def effective_system_prompt(self) -> str:
+        from teams_ollama_bridge.attachment_context_builder import AttachmentContextBuilder
+
+        suffix = AttachmentContextBuilder.attachment_system_prompt_suffix()
+        if suffix not in self.llm_system_prompt:
+            return f"{self.llm_system_prompt.strip()} {suffix}"
+        return self.llm_system_prompt
 
     def ensure_directories(self) -> None:
         """Erforderliche Verzeichnisse erstellen."""
@@ -146,6 +190,7 @@ class Settings(BaseSettings):
             "poll_interval_seconds": self.poll_interval_seconds,
             "file_stable_seconds": self.file_stable_seconds,
             "max_process_retries": self.max_process_retries,
+            "attachments_enabled": self.attachments_enabled,
             "ollama_model": (
                 self.ollama_model if self.processor_mode == ProcessorMode.OLLAMA else None
             ),

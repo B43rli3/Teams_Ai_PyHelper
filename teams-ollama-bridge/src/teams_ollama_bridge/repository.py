@@ -3,15 +3,34 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
+from teams_ollama_bridge.attachment_types import ProcessedAttachment
 from teams_ollama_bridge.exceptions import SQLiteError
 from teams_ollama_bridge.models import RequestStatus
 from teams_ollama_bridge.utils import utc_now, utc_now_iso
+
+
+@dataclass(frozen=True)
+class AttachmentRecord:
+    """Ein Datensatz aus der request_attachments-Tabelle."""
+
+    id: int
+    request_id: str
+    name: str
+    local_path: str | None
+    resolved_path: str | None
+    status: str
+    kind: str | None
+    file_size_bytes: int | None
+    extracted_characters: int | None
+    error_message: str | None
+    created_at: str | None
+    processed_at: str | None
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,46 @@ class RequestRepository:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS request_attachments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL,
+                    name TEXT,
+                    local_path TEXT,
+                    resolved_path TEXT,
+                    status TEXT,
+                    kind TEXT,
+                    file_size_bytes INTEGER,
+                    extracted_characters INTEGER,
+                    error_message TEXT,
+                    created_at TEXT,
+                    processed_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_request_attachments_request_id
+                ON request_attachments(request_id)
+                """
+            )
+
+    def _row_to_attachment(self, row: sqlite3.Row) -> AttachmentRecord:
+        return AttachmentRecord(
+            id=row["id"],
+            request_id=row["request_id"],
+            name=row["name"],
+            local_path=row["local_path"],
+            resolved_path=row["resolved_path"],
+            status=row["status"],
+            kind=row["kind"],
+            file_size_bytes=row["file_size_bytes"],
+            extracted_characters=row["extracted_characters"],
+            error_message=row["error_message"],
+            created_at=row["created_at"],
+            processed_at=row["processed_at"],
+        )
 
     def _row_to_record(self, row: sqlite3.Row) -> RequestRecord:
         return RequestRecord(
@@ -326,3 +385,48 @@ class RequestRepository:
                 (limit,),
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def save_attachments(
+        self,
+        request_id: str,
+        attachments: Sequence[ProcessedAttachment],
+    ) -> None:
+        """Attachment-Verarbeitungsergebnisse speichern."""
+        now = utc_now_iso()
+        with self._connection() as conn:
+            conn.execute(
+                "DELETE FROM request_attachments WHERE request_id = ?",
+                (request_id,),
+            )
+            for item in attachments:
+                file_size = item.source_path.stat().st_size if item.source_path else None
+                conn.execute(
+                    """
+                    INSERT INTO request_attachments (
+                        request_id, name, local_path, resolved_path, status, kind,
+                        file_size_bytes, extracted_characters, error_message,
+                        created_at, processed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        request_id,
+                        item.name,
+                        str(item.source_path) if item.source_path else None,
+                        str(item.source_path) if item.source_path else None,
+                        item.status.value,
+                        item.kind.value,
+                        file_size,
+                        item.extracted_characters,
+                        item.error,
+                        now,
+                        now if item.status.value == "processed" else None,
+                    ),
+                )
+
+    def list_attachments(self, request_id: str) -> list[AttachmentRecord]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM request_attachments WHERE request_id = ? ORDER BY id",
+                (request_id,),
+            ).fetchall()
+        return [self._row_to_attachment(row) for row in rows]

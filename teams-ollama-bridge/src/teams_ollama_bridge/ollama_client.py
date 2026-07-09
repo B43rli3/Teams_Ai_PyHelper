@@ -104,11 +104,15 @@ class OllamaClient:
 
     def process(self, message: str) -> ProcessorResult:
         """Nachricht an Ollama senden und Antwort extrahieren."""
+        return self.process_with_prompt(message)
+
+    def process_with_prompt(self, prompt: str, system_prompt: str | None = None) -> ProcessorResult:
+        """Nachricht mit optionalem angepassten Systemprompt senden."""
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": [
-                {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": message},
+                {"role": "system", "content": system_prompt or self._system_prompt},
+                {"role": "user", "content": prompt},
             ],
             "stream": False,
             "keep_alive": self._keep_alive,
@@ -138,3 +142,37 @@ class OllamaClient:
             model=self._model,
             processing_duration_ms=duration_ms,
         )
+
+    def analyze_image(
+        self,
+        model: str,
+        prompt: str,
+        image_base64: str,
+        timeout_seconds: float,
+    ) -> str:
+        """Bild über Ollama Vision analysieren."""
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [image_base64],
+                }
+            ],
+            "stream": False,
+        }
+        original_timeout = self._timeout_seconds
+        self._timeout_seconds = timeout_seconds
+        try:
+            data = self._post_chat(payload)
+        finally:
+            self._timeout_seconds = original_timeout
+
+        message_obj = data.get("message")
+        if not isinstance(message_obj, dict):
+            raise OllamaResponseError("Vision-Antwort enthält kein message-Feld.")
+        content = message_obj.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise OllamaResponseError("Vision-Antwort ist leer.")
+        return content.strip()

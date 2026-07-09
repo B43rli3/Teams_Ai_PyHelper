@@ -8,13 +8,14 @@ from pathlib import Path
 
 import httpx
 
+from teams_ollama_bridge.attachment_service import AttachmentService
 from teams_ollama_bridge.config import Settings, load_settings
 from teams_ollama_bridge.exceptions import (
     BridgeError,
     ConfigurationError,
     InstanceAlreadyRunningError,
 )
-from teams_ollama_bridge.file_service import output_path_for
+from teams_ollama_bridge.file_service import is_file_stable, load_input_request, output_path_for
 from teams_ollama_bridge.logging_config import get_logger, setup_logging
 from teams_ollama_bridge.models import ProcessorMode
 from teams_ollama_bridge.repository import RequestRepository
@@ -287,6 +288,55 @@ def cmd_show_request(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_inspect_attachments(args: argparse.Namespace) -> int:
+    """Attachments einer Request-JSON inspizieren ohne Verarbeitung."""
+    path = Path(args.file_path)
+    if not path.exists():
+        print(f"Datei nicht gefunden: {path}", file=sys.stderr)
+        return 1
+    try:
+        settings = load_settings()
+        _init_logging(settings)
+        request = load_input_request(path)
+        print(f"Request: {request.request_id}")
+        print(f"Attachments: {len(request.attachments)}\n")
+
+        if not request.attachments:
+            print("Keine Attachments vorhanden.")
+            return 0
+
+        service = AttachmentService(settings)
+        for index, info in enumerate(request.attachments, start=1):
+            print(f"{index}. {info.name or '(ohne Name)'}")
+            print(f"   localPath: {info.local_path or '-'}")
+            print(f"   status: {info.status or '-'}")
+            if info.error:
+                print(f"   error: {info.error}")
+            if info.local_path and info.local_path.strip():
+                try:
+                    resolved = service._resolver.resolve_local_path(info.local_path)
+                    print(f"   aufgelöst: {resolved.name}")
+                    print(f"   vorhanden: {'Ja' if resolved.exists() else 'Nein'}")
+                    if resolved.exists():
+                        print(f"   Größe: {resolved.stat().st_size} Bytes")
+                        stable = is_file_stable(resolved, settings.file_stable_seconds)
+                        print(f"   stabil: {'Ja' if stable else 'Nein'}")
+                except Exception as exc:
+                    print(f"   Pfadfehler: {exc}")
+
+        print("\nTestextraktion:")
+        batch = service.process_request(request, treat_missing_as_failed=True)
+        for item in batch.processed:
+            chars = item.extracted_characters or 0
+            print(f"  - {item.name}: {item.status.value}, {chars} Zeichen")
+            if item.error:
+                print(f"    Fehler: {item.error}")
+        return 0
+    except Exception as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 1
+
+
 def cmd_discover_onedrive(_args: argparse.Namespace) -> int:
     print("=== OneDrive-Pfad-Erkennung ===\n")
     paths = discover_onedrive_paths()
@@ -340,6 +390,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_parser.add_argument("request_id", help="requestId, z. B. test-001")
 
+    inspect_parser = subparsers.add_parser(
+        "inspect-attachments", help="Attachments einer Request-JSON debuggen"
+    )
+    inspect_parser.add_argument("file_path", help="Pfad zur Input-JSON-Datei")
+
     subparsers.add_parser(
         "discover-onedrive", help="Mögliche lokale OneDrive-Pfade anzeigen"
     )
@@ -358,6 +413,7 @@ def main() -> None:
         "list-pending": cmd_list_pending,
         "retry-failed": cmd_retry_failed,
         "show-request": cmd_show_request,
+        "inspect-attachments": cmd_inspect_attachments,
         "discover-onedrive": cmd_discover_onedrive,
     }
     handler = commands[args.command]

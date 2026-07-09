@@ -25,6 +25,38 @@ class ProcessorMode(StrEnum):
     OLLAMA = "ollama"
 
 
+class ImageProcessingMode(StrEnum):
+    """Bildverarbeitungsmodus."""
+
+    METADATA = "metadata"
+    OLLAMA_VISION = "ollama_vision"
+
+
+class AttachmentInfo(BaseModel):
+    """Attachment-Metadaten aus dem Power-Automate-Flow."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    name: str = ""
+    content_type: str | None = Field(default=None, alias="contentType")
+    content_url: str | None = Field(default=None, alias="contentUrl")
+    local_path: str | None = Field(default=None, alias="localPath")
+    status: str | None = None
+    error: str | None = None
+
+
+class AttachmentProcessedInfo(BaseModel):
+    """Attachment-Status in der Output-JSON."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    status: str
+    kind: str
+    extracted_characters: int | None = Field(default=None, alias="extractedCharacters")
+    error: str | None = None
+
+
 class InputRequest(BaseModel):
     """Input-JSON aus dem Power-Automate-Flow."""
 
@@ -36,6 +68,7 @@ class InputRequest(BaseModel):
     message: str = Field(min_length=1)
     sender: str | None = None
     created_at: str | None = Field(default=None, alias="createdAt")
+    attachments: list[AttachmentInfo] = Field(default_factory=list)
 
     @field_validator("request_id", "message_id", "chat_id", "message")
     @classmethod
@@ -67,6 +100,9 @@ class OutputResponse(BaseModel):
     sender: str | None = None
     source_file: str | None = Field(default=None, alias="sourceFile")
     error: str | None = None
+    attachments_processed: list[AttachmentProcessedInfo] | None = Field(
+        default=None, alias="attachmentsProcessed"
+    )
 
     def to_json_dict(self) -> dict[str, Any]:
         """Als Dictionary für JSON-Serialisierung."""

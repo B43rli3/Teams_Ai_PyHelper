@@ -16,6 +16,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "filelock>=3.16.0",
     "tenacity>=9.0.0",
+    "pymupdf>=1.24.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
@@ -50,3 +54,7 @@ python_version = "3.12"
 strict = true
 packages = ["teams_ollama_bridge"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["fitz", "openpyxl.*"]
+ignore_missing_imports = true
