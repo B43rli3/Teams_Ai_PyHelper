@@ -870,6 +870,7 @@ Der Befehl listet Attachments auf, löst lokale Pfade auf, prüft Dateigröße u
 | Request wird wiederholt übersprungen | Datei noch nicht lokal synchronisiert | OneDrive-Sync abwarten; `FILE_STABLE_SECONDS` prüfen |
 | `localPath` leer | Flow konnte Datei nicht kopieren | Nur selbst hochgeladene Dateien im aktuellen PoC |
 | Datei zu groß | `ATTACHMENTS_MAX_FILE_SIZE_MB` überschritten | Grenzwert in `.env` anpassen oder Datei verkleinern |
+| Prompt zu lang | Extrahierter Text + Nachricht > `LLM_MAX_INPUT_CHARACTERS` | `LLM_MAX_INPUT_CHARACTERS` erhöhen (z. B. `30000`) — ab v1.0 wird auch automatisch gekürzt |
 | Dateityp nicht erlaubt | Endung nicht in `ATTACHMENTS_ALLOWED_EXTENSIONS` | Erlaubte Endungen prüfen |
 | PDF ohne Text | Gescanntes PDF ohne extrahierbaren Text | Kein OCR — anderes Format verwenden |
 | Bildbeschreibung fehlgeschlagen | Vision-Modell nicht verfügbar | `IMAGE_PROCESSING_MODE=metadata` oder passendes Modell installieren |
