@@ -111,15 +111,27 @@ class AttachmentService:
 
         return batch
 
-    def build_prompt(self, message: str, batch: AttachmentBatchResult) -> str:
+    def build_prompt(
+        self,
+        message: str,
+        batch: AttachmentBatchResult,
+        *,
+        max_chars: int | None = None,
+    ) -> str:
         if not batch.processed:
             return message
-        return self._context_builder.build_user_prompt(message, batch)
+        return self._context_builder.build_user_prompt(message, batch, max_chars=max_chars)
 
     def _remaining_total_chars(self) -> int:
+        prompt_overhead = 1500
+        llm_budget = max(1000, self._settings.llm_max_input_characters - prompt_overhead)
+        effective_total = min(
+            self._settings.attachments_max_total_extracted_characters,
+            llm_budget,
+        )
         return max(
             0,
-            self._settings.attachments_max_total_extracted_characters - self._total_chars_used,
+            effective_total - self._total_chars_used,
         )
 
     def _process_single(

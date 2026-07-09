@@ -336,13 +336,11 @@ class RequestProcessor:
 
             cleaned = clean_message(request.message, self._settings.llm_max_input_characters)
             attachment_batch = self._prepare_attachments(request)
-            llm_prompt = self._attachment_service.build_prompt(cleaned, attachment_batch)
-
-            if len(llm_prompt) > self._settings.llm_max_input_characters:
-                raise MessageTooLongError(
-                    f"Der kombinierte Prompt überschreitet "
-                    f"{self._settings.llm_max_input_characters} Zeichen."
-                )
+            llm_prompt = self._attachment_service.build_prompt(
+                cleaned,
+                attachment_batch,
+                max_chars=self._settings.llm_max_input_characters,
+            )
 
             result = self._invoke_processor(cleaned, llm_prompt, attachment_batch)
 

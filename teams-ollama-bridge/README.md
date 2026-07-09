@@ -1037,8 +1037,10 @@ Vollständige Vorlage: `.env.example`
 | `OLLAMA_KEEP_ALIVE` | `10m` | Modell im Speicher halten |
 | `OLLAMA_TEMPERATURE` | `0.2` | Antwort-Temperatur |
 | `LLM_SYSTEM_PROMPT` | (siehe `.env.example`) | System-Prompt für das Modell |
-| `LLM_MAX_INPUT_CHARACTERS` | `12000` | Maximale Eingabelänge |
+| `LLM_MAX_INPUT_CHARACTERS` | `12000` | Maximale Eingabelänge für den kombinierten Prompt (Nachricht + Attachments) |
 | `LLM_MAX_OUTPUT_CHARACTERS` | `20000` | Maximale Ausgabelänge |
+
+> **Hinweis bei Attachments:** Wenn der extrahierte Dateiinhalt das Limit überschreitet, wird der Prompt automatisch gekürzt. Für längere Dokumente `LLM_MAX_INPUT_CHARACTERS` erhöhen (z. B. `30000` oder `60000`), abhängig vom Ollama-Modell.
 
 ### Attachments und Bilder
 
