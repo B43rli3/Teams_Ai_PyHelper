@@ -8,12 +8,16 @@ from pathlib import Path
 
 import httpx
 
+from teams_ollama_bridge.agent_loop import build_mcp_client, build_tool_policy
 from teams_ollama_bridge.attachment_service import AttachmentService
 from teams_ollama_bridge.config import Settings, load_settings
 from teams_ollama_bridge.exceptions import (
     BridgeError,
     ConfigurationError,
     InstanceAlreadyRunningError,
+    MCPAuthenticationError,
+    MCPProtocolError,
+    MCPUnavailableError,
 )
 from teams_ollama_bridge.file_service import is_file_stable, load_input_request, output_path_for
 from teams_ollama_bridge.logging_config import get_logger, setup_logging
@@ -358,6 +362,97 @@ def cmd_discover_onedrive(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp_check(_args: argparse.Namespace) -> int:
+    try:
+        settings = load_settings()
+        _init_logging(settings)
+    except ConfigurationError as exc:
+        print(f"Konfigurationsfehler: {exc.user_message}", file=sys.stderr)
+        return 1
+
+    print("=== MCP-Verbindungstest (CPD-AutoPlan) ===\n")
+    print(f"MCP aktiviert: {settings.mcp_enabled}")
+    print(f"MCP Server URL: {settings.mcp_server_url}")
+    print(f"MCP Token gesetzt: {'ja' if settings.mcp_token else 'nein'}")
+
+    if not settings.mcp_enabled:
+        print("\nHinweis: MCP_ENABLED=false — aktivieren Sie MCP in der .env für den Betrieb.")
+        return 0
+
+    policy = build_tool_policy(settings)
+    print(f"\nErlaubte Tools (Policy): {', '.join(sorted(policy.allowed_tools))}")
+    print(f"Blockierte Tools (Policy): {len(policy.blocked_tools)} Einträge")
+
+    try:
+        client = build_mcp_client(settings, policy)
+        tools = client.list_tools()
+    except MCPAuthenticationError as exc:
+        print(f"\nFehler: {exc.user_message}", file=sys.stderr)
+        return 1
+    except MCPUnavailableError as exc:
+        print(f"\nFehler: {exc.user_message}", file=sys.stderr)
+        return 1
+    except MCPProtocolError as exc:
+        print(f"\nProtokollfehler: {exc.user_message}", file=sys.stderr)
+        return 1
+    except BridgeError as exc:
+        print(f"\nFehler: {exc.user_message}", file=sys.stderr)
+        return 1
+
+    print(f"\nGefundene MCP-Tools: {len(tools)}")
+    for tool in sorted(tools, key=lambda item: item.name):
+        allowed = "erlaubt" if policy.is_allowed(tool.name) else "blockiert"
+        print(f"  - {tool.name} ({allowed})")
+
+    return 0
+
+
+def cmd_mcp_call_test(args: argparse.Namespace) -> int:
+    try:
+        settings = load_settings()
+        _init_logging(settings)
+    except ConfigurationError as exc:
+        print(f"Konfigurationsfehler: {exc.user_message}", file=sys.stderr)
+        return 1
+
+    if not settings.mcp_allow_manual_tool_test:
+        print(
+            "Fehler: MCP_ALLOW_MANUAL_TOOL_TEST ist nicht aktiviert.",
+            file=sys.stderr,
+        )
+        return 1
+    if not settings.mcp_enabled or not settings.mcp_token:
+        print("Fehler: MCP_ENABLED und MCP_TOKEN müssen gesetzt sein.", file=sys.stderr)
+        return 1
+
+    import json
+
+    policy = build_tool_policy(settings)
+    try:
+        arguments = json.loads(args.args_json)
+    except json.JSONDecodeError as exc:
+        print(f"Ungültiges JSON für --args: {exc}", file=sys.stderr)
+        return 1
+    if not isinstance(arguments, dict):
+        print("--args muss ein JSON-Objekt sein.", file=sys.stderr)
+        return 1
+
+    try:
+        client = build_mcp_client(settings, policy)
+        result = client.call_tool(args.tool_name, arguments)
+    except BridgeError as exc:
+        print(f"Fehler: {exc.user_message}", file=sys.stderr)
+        return 1
+
+    preview = result.text[:500]
+    if len(result.text) > 500:
+        preview += "..."
+    print(f"Tool: {args.tool_name}")
+    print(f"Status: ok={result.ok}, gekürzt={result.truncated}")
+    print(preview)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="teams-ollama-bridge",
@@ -399,6 +494,23 @@ def build_parser() -> argparse.ArgumentParser:
         "discover-onedrive", help="Mögliche lokale OneDrive-Pfade anzeigen"
     )
 
+    subparsers.add_parser(
+        "mcp-check",
+        help="MCP-Verbindung zu CPD-AutoPlan prüfen (nur tools/list)",
+    )
+
+    mcp_call_parser = subparsers.add_parser(
+        "mcp-call-test",
+        help="Einzelnes MCP-Tool testen (nur mit MCP_ALLOW_MANUAL_TOOL_TEST=true)",
+    )
+    mcp_call_parser.add_argument("tool_name", help="Name des MCP-Tools, z. B. get_state")
+    mcp_call_parser.add_argument(
+        "--args",
+        dest="args_json",
+        default="{}",
+        help='Tool-Argumente als JSON, z. B. "{}"',
+    )
+
     return parser
 
 
@@ -415,6 +527,8 @@ def main() -> None:
         "show-request": cmd_show_request,
         "inspect-attachments": cmd_inspect_attachments,
         "discover-onedrive": cmd_discover_onedrive,
+        "mcp-check": cmd_mcp_check,
+        "mcp-call-test": cmd_mcp_call_test,
     }
     handler = commands[args.command]
     sys.exit(handler(args))

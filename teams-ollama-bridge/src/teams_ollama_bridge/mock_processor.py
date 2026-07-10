@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from teams_ollama_bridge.attachment_types import AttachmentBatchResult, ProcessedAttachment
+from teams_ollama_bridge.models import McpMetadata
 from teams_ollama_bridge.text_cleaner import truncate_answer
 
 
@@ -16,6 +17,7 @@ class ProcessorResult:
     model: str
     processing_duration_ms: int
     attachments_processed: list[ProcessedAttachment] = field(default_factory=list)
+    mcp_metadata: McpMetadata | None = None
 
 
 class MockProcessor:

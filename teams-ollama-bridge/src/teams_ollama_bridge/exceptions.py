@@ -102,3 +102,38 @@ class EncryptedPdfError(BridgeError):
 
 class AttachmentExtractionError(BridgeError):
     """Fehler bei der Textextraktion aus einem Attachment."""
+
+
+class MCPUnavailableError(BridgeError):
+    """CPD-AutoPlan MCP-Server ist nicht erreichbar."""
+
+
+class MCPAuthenticationError(BridgeError):
+    """MCP-Bearer-Token ist ungültig oder veraltet."""
+
+
+class MCPConsentRequiredError(BridgeError):
+    """CPD-Agent-Consent (Allow agent) fehlt."""
+
+
+class MCPToolError(BridgeError):
+    """MCP-Tool-Aufruf ist fehlgeschlagen."""
+
+
+class MCPProtocolError(BridgeError):
+    """MCP-Protokoll- oder Transportfehler."""
+
+
+class MCPToolNotAllowedError(BridgeError):
+    """Tool ist durch die Sicherheitsrichtlinie blockiert."""
+
+    def __init__(self, tool_name: str) -> None:
+        super().__init__(
+            f"Das Tool '{tool_name}' ist aus Sicherheitsgründen nicht erlaubt.",
+            error_type="MCPToolNotAllowedError",
+        )
+        self.tool_name = tool_name
+
+
+class MCPResultTooLargeError(BridgeError):
+    """MCP-Toolergebnis überschreitet das Größenlimit."""

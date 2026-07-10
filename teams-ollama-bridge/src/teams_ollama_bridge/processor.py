@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from teams_ollama_bridge.agent_loop import AgentLoop, build_mcp_client, build_tool_policy
 from teams_ollama_bridge.attachment_service import AttachmentService
 from teams_ollama_bridge.attachment_types import (
     AttachmentBatchResult,
@@ -39,6 +40,8 @@ from teams_ollama_bridge.mock_processor import MockProcessor, ProcessorResult
 from teams_ollama_bridge.models import (
     AttachmentProcessedInfo,
     InputRequest,
+    McpMetadata,
+    McpToolCallInfo,
     OutputResponse,
     ProcessorMode,
     RequestStatus,
@@ -80,6 +83,15 @@ class RequestProcessor:
                 max_output_characters=settings.llm_max_output_characters,
             )
         self._attachment_service = AttachmentService(settings, self._ollama_client)
+        self._agent_loop: AgentLoop | None = None
+        if settings.mcp_enabled and settings.processor_mode == ProcessorMode.OLLAMA:
+            if self._ollama_client is None:
+                raise PermanentProcessingError("MCP erfordert Ollama-Modus.")
+            policy = build_tool_policy(settings)
+            mcp_client = build_mcp_client(settings, policy)
+            self._agent_loop = AgentLoop(settings, self._ollama_client, mcp_client)
+        elif settings.mcp_enabled and settings.processor_mode == ProcessorMode.MOCK:
+            logger.warning("MCP_ENABLED=true, aber PROCESSOR_MODE=mock — MCP wird ignoriert.")
 
     def _log_message_content(self, request_id: str, message: str) -> None:
         if self._settings.log_message_content:
@@ -95,6 +107,28 @@ class RequestProcessor:
             return self._mock_processor.process(cleaned_message, attachment_batch)
         if self._ollama_client is None:
             raise PermanentProcessingError("Ollama-Client ist nicht konfiguriert.")
+        if self._agent_loop is not None:
+            loop_result = self._agent_loop.run(
+                llm_prompt,
+                self._settings.effective_system_prompt,
+            )
+            tools_called = [
+                McpToolCallInfo(name=item.name, status=item.status)
+                for item in loop_result.tools_called
+            ]
+            mcp_meta = McpMetadata(
+                enabled=True,
+                used=loop_result.mcp_used,
+                toolsCalled=tools_called,
+                error=loop_result.mcp_error,
+            )
+            return ProcessorResult(
+                answer=loop_result.answer,
+                model=loop_result.model,
+                processing_duration_ms=loop_result.processing_duration_ms,
+                attachments_processed=attachment_batch.processed,
+                mcp_metadata=mcp_meta,
+            )
         result = self._ollama_client.process_with_prompt(
             llm_prompt,
             system_prompt=self._settings.effective_system_prompt,
@@ -137,6 +171,13 @@ class RequestProcessor:
                 )
         return output or None
 
+    def _build_mcp_metadata(self, result: ProcessorResult) -> McpMetadata | None:
+        if not self._settings.mcp_enabled:
+            return None
+        if result.mcp_metadata is not None:
+            return result.mcp_metadata
+        return McpMetadata(enabled=True, used=False, toolsCalled=[], error=None)
+
     def _is_already_completed(self, request_id: str) -> bool:
         record = self._repository.get(request_id)
         if record is None:
@@ -154,6 +195,7 @@ class RequestProcessor:
         attachment_batch: AttachmentBatchResult,
     ) -> OutputResponse:
         attachments_output = self._attachments_to_output(attachment_batch.processed)
+        mcp_output = self._build_mcp_metadata(result)
         return OutputResponse(
             requestId=request.request_id,
             messageId=request.message_id,
@@ -166,6 +208,7 @@ class RequestProcessor:
             sender=request.sender,
             sourceFile=source_file,
             attachmentsProcessed=attachments_output,
+            mcp=mcp_output,
         )
 
     def _handle_permanent_failure(

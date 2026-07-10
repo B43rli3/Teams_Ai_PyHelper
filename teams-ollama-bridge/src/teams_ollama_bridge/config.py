@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from teams_ollama_bridge.exceptions import ConfigurationError
 from teams_ollama_bridge.models import ImageProcessingMode, ProcessorMode
+from teams_ollama_bridge.tool_policy import DEFAULT_ALLOWED_TOOLS, DEFAULT_BLOCKED_TOOLS
 
 
 class Settings(BaseSettings):
@@ -80,6 +81,38 @@ class Settings(BaseSettings):
     log_max_bytes: int = 5_000_000
     log_backup_count: int = 5
 
+    mcp_enabled: bool = Field(default=False, alias="MCP_ENABLED")
+    mcp_server_url: str = Field(
+        default="http://127.0.0.1:7373/mcp",
+        alias="MCP_SERVER_URL",
+    )
+    mcp_token: str | None = Field(default=None, alias="MCP_TOKEN")
+    mcp_timeout_seconds: float = Field(default=30.0, alias="MCP_TIMEOUT_SECONDS")
+    mcp_read_timeout_seconds: float = Field(default=120.0, alias="MCP_READ_TIMEOUT_SECONDS")
+    mcp_connect_timeout_seconds: float = Field(default=10.0, alias="MCP_CONNECT_TIMEOUT_SECONDS")
+    mcp_max_tool_rounds: int = Field(default=4, alias="MCP_MAX_TOOL_ROUNDS")
+    mcp_max_tool_calls_total: int = Field(default=8, alias="MCP_MAX_TOOL_CALLS_TOTAL")
+    mcp_max_result_characters: int = Field(default=30000, alias="MCP_MAX_RESULT_CHARACTERS")
+    mcp_fail_on_unavailable: bool = Field(default=False, alias="MCP_FAIL_ON_UNAVAILABLE")
+    mcp_log_tool_calls: bool = Field(default=True, alias="MCP_LOG_TOOL_CALLS")
+    mcp_log_tool_results: bool = Field(default=False, alias="MCP_LOG_TOOL_RESULTS")
+    mcp_allow_manual_tool_test: bool = Field(default=False, alias="MCP_ALLOW_MANUAL_TOOL_TEST")
+    mcp_allowed_tools: str = Field(
+        default=",".join(sorted(DEFAULT_ALLOWED_TOOLS)),
+        alias="MCP_ALLOWED_TOOLS",
+    )
+    mcp_blocked_tools: str = Field(
+        default=",".join(sorted(DEFAULT_BLOCKED_TOOLS)),
+        alias="MCP_BLOCKED_TOOLS",
+    )
+
+    @field_validator("mcp_token", mode="before")
+    @classmethod
+    def empty_mcp_token_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator(
         "teams_llm_root",
         "input_dir",
@@ -141,6 +174,12 @@ class Settings(BaseSettings):
         if self.attachments_base_dir is None and self.input_dir is not None:
             self.attachments_base_dir = self.input_dir
 
+        if self.mcp_enabled and not self.mcp_token:
+            raise ConfigurationError(
+                "MCP_ENABLED=true, aber MCP_TOKEN ist nicht gesetzt. "
+                "Tragen Sie den Token aus dem CPD-Agent-Panel in die .env ein."
+            )
+
         return self
 
     @property
@@ -154,6 +193,30 @@ class Settings(BaseSettings):
             for ext in self.attachments_allowed_extensions.split(",")
             if ext.strip()
         }
+
+    @property
+    def parsed_mcp_allowed_tools(self) -> set[str]:
+        return {name.strip() for name in self.mcp_allowed_tools.split(",") if name.strip()}
+
+    @property
+    def parsed_mcp_blocked_tools(self) -> set[str]:
+        return {name.strip() for name in self.mcp_blocked_tools.split(",") if name.strip()}
+
+    def warn_if_mcp_non_localhost(self) -> None:
+        """Warnt, wenn MCP_SERVER_URL nicht auf Loopback zeigt."""
+        if not self.mcp_enabled:
+            return
+        from urllib.parse import urlparse
+
+        from teams_ollama_bridge.logging_config import get_logger
+
+        host = (urlparse(self.mcp_server_url).hostname or "").lower()
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            get_logger(__name__).warning(
+                "MCP_SERVER_URL zeigt nicht auf localhost (%s). "
+                "Der CPD-PoC ist nur für 127.0.0.1 vorgesehen.",
+                self.mcp_server_url,
+            )
 
     @property
     def effective_system_prompt(self) -> str:
@@ -191,6 +254,9 @@ class Settings(BaseSettings):
             "file_stable_seconds": self.file_stable_seconds,
             "max_process_retries": self.max_process_retries,
             "attachments_enabled": self.attachments_enabled,
+            "mcp_enabled": self.mcp_enabled,
+            "mcp_server_url": self.mcp_server_url,
+            "mcp_token_set": bool(self.mcp_token),
             "ollama_model": (
                 self.ollama_model if self.processor_mode == ProcessorMode.OLLAMA else None
             ),
@@ -203,6 +269,7 @@ def load_settings() -> Settings:
     try:
         settings = Settings()
         settings.ensure_directories()
+        settings.warn_if_mcp_non_localhost()
         return settings
     except ConfigurationError:
         raise
