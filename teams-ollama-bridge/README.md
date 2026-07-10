@@ -19,20 +19,21 @@ Die Anwendung läuft dauerhaft auf einem Windows-PC, überwacht einen lokal sync
 7. [Schritt-für-Schritt: Mock-Modus testen](#schritt-für-schritt-mock-modus-testen)
 8. [Schritt-für-Schritt: Teams-End-to-End-Test](#schritt-für-schritt-teams-end-to-end-test)
 9. [Schritt-für-Schritt: Umstellung auf Ollama](#schritt-für-schritt-umstellung-auf-ollama)
-10. [Schritt-für-Schritt: Windows-Autostart](#schritt-für-schritt-windows-autostart)
-11. [Verbindung zu den Power-Automate-Flows](#verbindung-zu-den-power-automate-flows)
-12. [Dateianhänge aus dem aktuellen Power-Automate-PoC](#dateianhänge-aus-dem-aktuellen-power-automate-poc)
-13. [Input- und Outputformat](#input--und-outputformat)
-14. [CLI-Befehle](#cli-befehle)
-15. [Konfigurationsreferenz](#konfigurationsreferenz)
-16. [Logging](#logging)
-17. [SQLite-Status und Archivierung](#sqlite-status-und-archivierung)
-18. [Fehlerbehandlung und Neustartverhalten](#fehlerbehandlung-und-neustartverhalten)
-19. [Typische Probleme](#typische-probleme)
-20. [Datenschutz](#datenschutz)
-21. [Tests ausführen](#tests-ausführen)
-22. [CPD-AutoPlan MCP-Integration](#cpd-autoplan-mcp-integration)
-23. [Zukünftige Erweiterungen](#zukünftige-erweiterungen)
+10. [Schritt-für-Schritt: CPD-AutoPlan MCP aktivieren (optional)](#schritt-für-schritt-cpd-autoplan-mcp-aktivieren-optional)
+11. [Schritt-für-Schritt: Windows-Autostart](#schritt-für-schritt-windows-autostart)
+12. [Verbindung zu den Power-Automate-Flows](#verbindung-zu-den-power-automate-flows)
+13. [Dateianhänge aus dem aktuellen Power-Automate-PoC](#dateianhänge-aus-dem-aktuellen-power-automate-poc)
+14. [Input- und Outputformat](#input--und-outputformat)
+15. [CLI-Befehle](#cli-befehle)
+16. [Konfigurationsreferenz](#konfigurationsreferenz)
+17. [Logging](#logging)
+18. [SQLite-Status und Archivierung](#sqlite-status-und-archivierung)
+19. [Fehlerbehandlung und Neustartverhalten](#fehlerbehandlung-und-neustartverhalten)
+20. [Typische Probleme](#typische-probleme)
+21. [Datenschutz](#datenschutz)
+22. [Tests ausführen](#tests-ausführen)
+23. [CPD-AutoPlan MCP-Integration (Referenz)](#cpd-autoplan-mcp-integration-referenz)
+24. [Zukünftige Erweiterungen](#zukünftige-erweiterungen)
 
 ---
 
@@ -346,7 +347,13 @@ LOCK_FILE_PATH=data\worker.lock
 LOG_FILE_PATH=logs\teams-ollama-bridge.log
 LOG_MAX_BYTES=5000000
 LOG_BACKUP_COUNT=5
+
+# MCP (optional, erst nach Ollama-Umstellung — siehe Schritt-für-Schritt-Anleitung)
+MCP_ENABLED=false
+# MCP_TOKEN=
 ```
+
+> **MCP optional:** Die vollständigen `MCP_*`-Variablen stehen in `.env.example`. Standard ist `MCP_ENABLED=false` — ohne diese Zeilen läuft alles wie bisher.
 
 ### Schritt 5 — Abgeleitete Pfade verstehen
 
@@ -693,6 +700,144 @@ Erwartete zusätzliche Zeile:
 In Teams: `/ai Erkläre mir kurz, was Ollama ist.`
 
 Die Antwort sollte nun vom lokalen Modell stammen (nicht mehr die Mock-Nachricht).
+
+> **Optional — CPD-Anbindung:** Wenn Sie Teams-Anfragen mit CPD-Projektdaten beantworten möchten, folgen Sie als Nächstes [Schritt-für-Schritt: CPD-AutoPlan MCP aktivieren](#schritt-für-schritt-cpd-autoplan-mcp-aktivieren-optional).
+
+---
+
+## Schritt-für-Schritt: CPD-AutoPlan MCP aktivieren (optional)
+
+Dieser Schritt ist **optional** und setzt voraus:
+
+- [Mock-Test](#schritt-für-schritt-mock-modus-testen) war erfolgreich
+- [Ollama-Umstellung](#schritt-für-schritt-umstellung-auf-ollama) läuft stabil (`PROCESSOR_MODE=ollama`)
+- **CPD-AutoPlan** ist auf dem gleichen PC installiert (lokales Projekt `CPD-Common-Project-Database`)
+
+Ohne `MCP_ENABLED=true` bleibt der Worker unverändert — nur Ollama, kein CPD-Zugriff.
+
+### Schritt 1 — CPD-AutoPlan starten
+
+1. CPD-AutoPlan starten
+2. Ein **Projekt öffnen** (MCP liefert nur Daten aus dem geöffneten Projekt)
+3. Prüfen, dass der MCP-Server unter `http://127.0.0.1:7373/mcp` erreichbar ist (wird von CPD gestartet)
+
+### Schritt 2 — Bearer-Token kopieren
+
+1. Im CPD-Fenster das **Agent Panel** öffnen
+2. Den angezeigten **Bearer-Token** kopieren
+3. Token **nicht** in Teams, Chats oder Git committen — nur in die lokale `.env`
+
+### Schritt 3 — .env für MCP erweitern
+
+`.env` im Projektordner öffnen und ergänzen:
+
+```ini
+PROCESSOR_MODE=ollama
+
+MCP_ENABLED=true
+MCP_SERVER_URL=http://127.0.0.1:7373/mcp
+MCP_TOKEN=<hier Token aus CPD Agent Panel einfügen>
+```
+
+Weitere `MCP_*`-Werte können aus `.env.example` übernommen werden; die Standard-Allowlist blockiert Schreib- und Admin-Tools.
+
+Datei speichern.
+
+### Schritt 4 — MCP-Verbindung prüfen (`mcp-check`)
+
+Im Projektordner `teams-ollama-bridge\`:
+
+```powershell
+.\.venv\Scripts\python.exe -m teams_ollama_bridge mcp-check
+```
+
+Erwartete Ausgabe (Auszug):
+
+```
+=== MCP-Verbindungstest (CPD-AutoPlan) ===
+
+MCP aktiviert: True
+MCP Server URL: http://127.0.0.1:7373/mcp
+MCP Token gesetzt: ja
+
+Gefundene MCP-Tools: 51
+  - get_state (erlaubt)
+  - query_elements (erlaubt)
+  - delete_group (blockiert)
+  ...
+```
+
+| Meldung | Lösung |
+|---------|--------|
+| `MCP_TOKEN ist nicht gesetzt` | Token in `.env` eintragen, Worker/Shell neu starten |
+| `Authentifizierung fehlgeschlagen` | Token im CPD Agent Panel neu kopieren |
+| `nicht erreichbar` | CPD-AutoPlan starten, Projekt öffnen, Port 7373 prüfen |
+
+### Schritt 5 — „Allow agent“ in CPD bestätigen
+
+Für echte Tool-Aufrufe (`tools/call`) muss in CPD einmalig **„Allow agent“** geklickt werden.
+
+Ohne diese Bestätigung schlagen `mcp-call-test` und Teams-Anfragen mit CPD-Bezug mit einem Consent-Hinweis fehl.
+
+### Schritt 6 — Einzelnes Tool testen (optional)
+
+Nur für lokales Debugging — in Produktion normalerweise **nicht** nötig:
+
+```ini
+MCP_ALLOW_MANUAL_TOOL_TEST=true
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m teams_ollama_bridge mcp-call-test get_state --args "{}"
+```
+
+Erwartung: JSON-Antwort mit `ok=true` (nach „Allow agent“).
+
+### Schritt 7 — Worker neu starten
+
+```powershell
+.\scripts\start.cmd
+```
+
+Alternativ laufenden Worker mit **Strg+C** beenden und erneut starten. Die `.env`-Änderungen werden nur beim Start gelesen.
+
+### Schritt 8 — Teams-Anfrage mit CPD-Bezug testen
+
+In Teams (mit laufendem Worker und Flow 1/2):
+
+```
+/ai Welche Elemente sind im aktuellen CPD-Projekt sichtbar?
+```
+
+Oder lokal eine Testdatei in `TeamsLLM\input\` ablegen (neue `requestId` verwenden).
+
+### Schritt 9 — Ergebnis prüfen
+
+```powershell
+$teamsRoot = "C:\Users\...\TeamsLLM"
+Get-Content "$teamsRoot\output\response_<requestId>.json"
+```
+
+Bei aktivem MCP kann die Antwort ein optionales `mcp`-Feld enthalten:
+
+```json
+{
+  "requestId": "test-cpd-001",
+  "answer": "...",
+  "status": "completed",
+  "mcp": {
+    "enabled": true,
+    "used": true,
+    "toolsCalled": [
+      {"name": "get_state", "status": "completed"}
+    ]
+  }
+}
+```
+
+Flow 2 ignoriert unbekannte Felder — bestehende Power-Automate-Flows bleiben kompatibel.
+
+> **Details:** Architektur, Tool-Policy und Fehlerfälle siehe [CPD-AutoPlan MCP-Integration (Referenz)](#cpd-autoplan-mcp-integration-referenz).
 
 ---
 
@@ -1226,6 +1371,17 @@ Nach einem Neustart des Workers oder PCs:
 | Timeout | `Ollama-Anfrage hat das Zeitlimit überschritten` | `OLLAMA_TIMEOUT_SECONDS` erhöhen |
 | Falscher Port | Verbindungsfehler | `OLLAMA_BASE_URL` prüfen |
 
+### CPD-AutoPlan MCP
+
+| Problem | Symptom | Lösung |
+|---------|---------|--------|
+| MCP deaktiviert | Kein CPD-Zugriff trotz CPD-Lauf | `MCP_ENABLED=true` und `PROCESSOR_MODE=ollama` in `.env` |
+| Token fehlt | Start-/Config-Fehler | `MCP_TOKEN` aus CPD Agent Panel setzen |
+| CPD nicht gestartet | `mcp-check`: nicht erreichbar | CPD starten, Projekt öffnen |
+| Consent fehlt | Hinweis auf „Allow agent“ | Im CPD-Fenster **Allow agent** klicken |
+| Mock + MCP | Warnung im Log, MCP ignoriert | `PROCESSOR_MODE=ollama` setzen |
+| Zu viele Tool-Schritte | Abbruchmeldung in der Antwort | `MCP_MAX_TOOL_ROUNDS` / `MCP_MAX_TOOL_CALLS_TOTAL` prüfen |
+
 ### Anwendung
 
 | Problem | Symptom | Lösung |
@@ -1270,9 +1426,11 @@ Optional: Live-MCP-Integrationstests mit `RUN_MCP_INTEGRATION_TESTS=true` (nur a
 
 ---
 
-## CPD-AutoPlan MCP-Integration
+## CPD-AutoPlan MCP-Integration (Referenz)
 
 Diese Erweiterung verbindet den Worker optional mit dem lokalen **CPD-AutoPlan MCP-Server**. Teams-Nachrichten können dann über Ollama Tool Calling gegen CPD-Projektdaten beantwortet werden — ohne Änderungen an den Power-Automate-Flows.
+
+> **Einrichtung:** Schritt-für-Schritt-Anleitung unter [CPD-AutoPlan MCP aktivieren](#schritt-für-schritt-cpd-autoplan-mcp-aktivieren-optional).
 
 ### Architektur
 
