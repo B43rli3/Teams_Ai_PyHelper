@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from teams_ollama_bridge.exceptions import ConfigurationError
 from teams_ollama_bridge.models import ImageProcessingMode, ProcessorMode
-from teams_ollama_bridge.tool_policy import DEFAULT_ALLOWED_TOOLS, DEFAULT_BLOCKED_TOOLS
+from teams_ollama_bridge.tool_policy import McpToolPolicyMode
 
 
 class Settings(BaseSettings):
@@ -97,14 +97,9 @@ class Settings(BaseSettings):
     mcp_log_tool_calls: bool = Field(default=True, alias="MCP_LOG_TOOL_CALLS")
     mcp_log_tool_results: bool = Field(default=False, alias="MCP_LOG_TOOL_RESULTS")
     mcp_allow_manual_tool_test: bool = Field(default=False, alias="MCP_ALLOW_MANUAL_TOOL_TEST")
-    mcp_allowed_tools: str = Field(
-        default=",".join(sorted(DEFAULT_ALLOWED_TOOLS)),
-        alias="MCP_ALLOWED_TOOLS",
-    )
-    mcp_blocked_tools: str = Field(
-        default=",".join(sorted(DEFAULT_BLOCKED_TOOLS)),
-        alias="MCP_BLOCKED_TOOLS",
-    )
+    mcp_tool_policy: McpToolPolicyMode = Field(default="full", alias="MCP_TOOL_POLICY")
+    mcp_allowed_tools: str = Field(default="", alias="MCP_ALLOWED_TOOLS")
+    mcp_blocked_tools: str = Field(default="", alias="MCP_BLOCKED_TOOLS")
 
     @field_validator("mcp_token", mode="before")
     @classmethod
@@ -256,6 +251,7 @@ class Settings(BaseSettings):
             "attachments_enabled": self.attachments_enabled,
             "mcp_enabled": self.mcp_enabled,
             "mcp_server_url": self.mcp_server_url,
+            "mcp_tool_policy": self.mcp_tool_policy,
             "mcp_token_set": bool(self.mcp_token),
             "ollama_model": (
                 self.ollama_model if self.processor_mode == ProcessorMode.OLLAMA else None

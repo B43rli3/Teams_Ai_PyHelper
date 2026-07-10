@@ -380,8 +380,24 @@ def cmd_mcp_check(_args: argparse.Namespace) -> int:
         return 0
 
     policy = build_tool_policy(settings)
-    print(f"\nErlaubte Tools (Policy): {', '.join(sorted(policy.allowed_tools))}")
-    print(f"Blockierte Tools (Policy): {len(policy.blocked_tools)} Einträge")
+    if policy.uses_full_server_catalog:
+        blocked_count = len(policy.blocked_tools)
+        if blocked_count:
+            print(
+                "\nTool-Policy: full — alle vom MCP-Server gemeldeten Tools "
+                f"(außer {blocked_count} in MCP_BLOCKED_TOOLS)"
+            )
+        else:
+            print(
+                "\nTool-Policy: full — alle vom MCP-Server gemeldeten Tools "
+                "(keine Client-Blocklist)"
+            )
+        if policy.blocked_tools:
+            print(f"Client-Blocklist: {', '.join(sorted(policy.blocked_tools))}")
+    else:
+        print(f"\nTool-Policy: read_only — Allowlist ({len(policy.allowed_tools)} Tools)")
+        print(f"Erlaubte Tools: {', '.join(sorted(policy.allowed_tools))}")
+        print(f"Blockierte Tools (Client): {len(policy.blocked_tools)} Einträge")
 
     try:
         client = build_mcp_client(settings, policy)

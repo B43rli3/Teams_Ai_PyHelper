@@ -737,9 +737,12 @@ PROCESSOR_MODE=ollama
 MCP_ENABLED=true
 MCP_SERVER_URL=http://127.0.0.1:7373/mcp
 MCP_TOKEN=<hier Token aus CPD Agent Panel einfügen>
+MCP_TOOL_POLICY=full
 ```
 
-Weitere `MCP_*`-Werte können aus `.env.example` übernommen werden; die Standard-Allowlist blockiert Schreib- und Admin-Tools.
+Standard (`MCP_TOOL_POLICY=full`): **alle** vom CPD-Server gemeldeten Tools (typisch 51) werden an Ollama übergeben. Der CPD-Server selbst schränkt `tools/list` nicht ein — frühere „10 erlaubt / 41 blockiert“-Meldungen kamen von der **Client-Allowlist** in älteren Bridge-Versionen.
+
+Falls Sie noch eine alte `.env` mit langen `MCP_ALLOWED_TOOLS` / `MCP_BLOCKED_TOOLS`-Listen haben: `MCP_TOOL_POLICY=full` setzen und `MCP_BLOCKED_TOOLS=` leeren.
 
 Datei speichern.
 
@@ -760,10 +763,12 @@ MCP aktiviert: True
 MCP Server URL: http://127.0.0.1:7373/mcp
 MCP Token gesetzt: ja
 
+Tool-Policy: full — alle vom MCP-Server gemeldeten Tools (keine Client-Blocklist)
+
 Gefundene MCP-Tools: 51
   - get_state (erlaubt)
   - query_elements (erlaubt)
-  - delete_group (blockiert)
+  - delete_group (erlaubt)
   ...
 ```
 
@@ -1226,8 +1231,11 @@ Vollständige Vorlage: `.env.example`
 | `MCP_LOG_TOOL_CALLS` | `true` | Tool-Namen im Log (ohne Token/Argumente) |
 | `MCP_LOG_TOOL_RESULTS` | `false` | Tool-Ergebnis-Vorschau im Log |
 | `MCP_ALLOW_MANUAL_TOOL_TEST` | `false` | `mcp-call-test` freischalten |
-| `MCP_ALLOWED_TOOLS` | siehe `.env.example` | Kommagetrennte Allowlist (nur Lesetools) |
-| `MCP_BLOCKED_TOOLS` | siehe `.env.example` | Kommagetrennte Blocklist (Schreib-/Admin-Tools) |
+| `MCP_TOOL_POLICY` | `full` | `full` = alle Server-Tools; `read_only` = nur Lesetools |
+| `MCP_ALLOWED_TOOLS` | (leer) | Nur bei `read_only`: kommagetrennte Allowlist |
+| `MCP_BLOCKED_TOOLS` | (leer) | Optional: Tools client-seitig sperren (auch bei `full`) |
+
+> **Hinweis:** CPD-AutoPlan meldet in `tools/list` immer den **vollen Katalog** (~51 Tools). Welche Tools Ollama nutzen darf, steuert **diese Bridge** über `MCP_TOOL_POLICY` / `MCP_BLOCKED_TOOLS` — nicht der CPD-Server.
 
 > **Sicherheit:** `MCP_TOKEN` wird nur an den lokalen CPD-MCP-Server gesendet, nie an Ollama, nie in Output-JSON und nie in Logs.
 
@@ -1380,6 +1388,7 @@ Nach einem Neustart des Workers oder PCs:
 | CPD nicht gestartet | `mcp-check`: nicht erreichbar | CPD starten, Projekt öffnen |
 | Consent fehlt | Hinweis auf „Allow agent“ | Im CPD-Fenster **Allow agent** klicken |
 | Mock + MCP | Warnung im Log, MCP ignoriert | `PROCESSOR_MODE=ollama` setzen |
+| Viele Tools „blockiert“ in `mcp-check` | Nur 10 erlaubt, Rest blockiert | `MCP_TOOL_POLICY=full` setzen, `MCP_BLOCKED_TOOLS=` leeren, Worker neu starten |
 | Zu viele Tool-Schritte | Abbruchmeldung in der Antwort | `MCP_MAX_TOOL_ROUNDS` / `MCP_MAX_TOOL_CALLS_TOTAL` prüfen |
 
 ### Anwendung
@@ -1448,8 +1457,8 @@ Teams → Flow 1 → OneDrive → teams-ollama-bridge
 |------------|-------|
 | **teams-ollama-bridge** | Orchestriert Ollama und MCP (Agent Loop) |
 | **Ollama** | Entscheidet, welche CPD-Tools aufgerufen werden |
-| **CPD-AutoPlan MCP** | Stellt Projekt-/Elementdaten bereit (read-only PoC) |
-| **ToolPolicy** | Erlaubt nur ausgewählte Lesetools, blockiert Schreib-/Admin-Tools |
+| **CPD-AutoPlan MCP** | Stellt den vollen Tool-Katalog bereit (~51 Tools); Consent gated Ausführung |
+| **ToolPolicy (Bridge)** | Optionaler Client-Filter; Standard `full` = alle Server-Tools |
 
 ### Voraussetzungen
 
@@ -1467,6 +1476,7 @@ In `.env`:
 MCP_ENABLED=true
 MCP_SERVER_URL=http://127.0.0.1:7373/mcp
 MCP_TOKEN=<Token aus CPD Agent Panel>
+MCP_TOOL_POLICY=full
 PROCESSOR_MODE=ollama
 ```
 
@@ -1481,7 +1491,7 @@ Worker neu starten. Ohne `MCP_ENABLED=true` bleibt das Verhalten unverändert.
 Erwartung:
 
 - Verbindung erfolgreich
-- Liste aller MCP-Tools mit Markierung **erlaubt** / **blockiert**
+- `Tool-Policy: full` und alle ~51 Tools als **erlaubt** (sofern keine `MCP_BLOCKED_TOOLS`)
 - Kein Token in der Konsolenausgabe
 
 Optional ein einzelnes Tool testen (nur Entwicklung):
@@ -1494,20 +1504,18 @@ MCP_ALLOW_MANUAL_TOOL_TEST=true
 .\.venv\Scripts\python.exe -m teams_ollama_bridge mcp-call-test get_state --args "{}"
 ```
 
-### Tool-Policy (Sicherheit)
+### Tool-Policy (Client-seitig)
 
-Standardmäßig erlaubt (Lesen):
+Der CPD-MCP-Server registriert **bedingungslos alle Tools** in `tools/list`. Die Bridge kann optional filtern:
 
-- `get_state`, `query_elements`, `list_annotations`, `list_catalog_fields`
-- `describe_catalog`, `get_group_template`, `get_annotation_values`
-- `field_values`, `get_elements`, `get_run_status`
+| Modus | `.env` | Verhalten |
+|-------|--------|-----------|
+| **full** (Standard) | `MCP_TOOL_POLICY=full` | Alle vom Server gemeldeten Tools an Ollama; optional `MCP_BLOCKED_TOOLS` |
+| **read_only** | `MCP_TOOL_POLICY=read_only` | Nur 10 Lesetools (Preset), Schreib-/Admin-Tools client-seitig gesperrt |
 
-Standardmäßig blockiert (u. a.):
+Bei `full` ohne Blocklist sieht `mcp-check` alle Tools als **erlaubt**. Schreibende Aktionen können im CPD trotzdem **„Allow agent“** erfordern — das ist Server-Consent, keine Client-Sperre.
 
-- `screenshot`, `set_active_stage`
-- alle Schreib-, Lösch- und Admin-Tools (`update_cell_value`, `delete_group`, `start_run`, …)
-
-Die Policy wird **vor jedem** `tools/call` im Python-Code geprüft — unabhängig davon, was Ollama anfordert.
+Die Policy wird **vor jedem** `tools/call` in der Bridge geprüft.
 
 ### Agent Loop
 

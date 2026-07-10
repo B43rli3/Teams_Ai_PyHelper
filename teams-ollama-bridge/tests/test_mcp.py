@@ -61,7 +61,13 @@ def policy() -> ToolPolicy:
             "delete_group",
             "start_run",
         },
+        allow_all=False,
     )
+
+
+@pytest.fixture
+def full_policy() -> ToolPolicy:
+    return ToolPolicy.from_settings("full", set(), set())
 
 
 def test_mcp_disabled_by_default(settings: Settings) -> None:
@@ -140,6 +146,35 @@ def test_policy_blocks_admin_tool(policy: ToolPolicy) -> None:
 
 def test_unknown_tool_blocked(policy: ToolPolicy) -> None:
     assert not policy.is_allowed("unknown_tool")
+
+
+def test_unknown_tool_allowed_in_full_mode(full_policy: ToolPolicy) -> None:
+    assert full_policy.is_allowed("delete_group")
+    assert full_policy.is_allowed("unknown_tool")
+
+
+def test_full_policy_blocks_explicit_blocklist() -> None:
+    policy = ToolPolicy.from_settings("full", set(), {"screenshot"})
+    assert policy.is_allowed("get_state")
+    assert not policy.is_allowed("screenshot")
+
+
+def test_read_only_policy_uses_presets_when_lists_empty() -> None:
+    policy = ToolPolicy.from_settings("read_only", set(), set())
+    assert policy.is_allowed("get_state")
+    assert not policy.is_allowed("delete_group")
+    assert not policy.is_allowed("screenshot")
+
+
+def test_registry_full_mode_includes_all_server_tools(full_policy: ToolPolicy) -> None:
+    fake_client = MagicMock()
+    fake_client.list_tools.return_value = [
+        DiscoveredMcpTool("get_state", "state", {"type": "object"}),
+        DiscoveredMcpTool("delete_group", "delete", {"type": "object"}),
+    ]
+    registry = McpToolRegistry(fake_client, full_policy)
+    allowed = registry.discover_allowed_tools()
+    assert [tool.name for tool in allowed] == ["get_state", "delete_group"]
 
 
 def test_to_ollama_tool_definition() -> None:
@@ -444,7 +479,7 @@ def test_mcp_check_cli_disabled(workspace, monkeypatch: pytest.MonkeyPatch, caps
     assert "MCP aktiviert: False" in captured.out
 
 
-def test_mcp_check_cli_lists_tools(
+def test_mcp_check_cli_lists_tools_read_only(
     workspace, monkeypatch: pytest.MonkeyPatch, capsys, policy: ToolPolicy
 ) -> None:
     monkeypatch.chdir(workspace)
@@ -472,6 +507,33 @@ def test_mcp_check_cli_lists_tools(
     assert "secret" not in captured.out
 
 
+def test_mcp_check_cli_full_policy(
+    workspace, monkeypatch: pytest.MonkeyPatch, capsys, full_policy: ToolPolicy
+) -> None:
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("TEAMS_LLM_ROOT", str(workspace / "TeamsLLM"))
+    monkeypatch.setenv("MCP_ENABLED", "true")
+    monkeypatch.setenv("MCP_TOKEN", "secret")
+
+    fake_tools = [
+        DiscoveredMcpTool("get_state", "state", {"type": "object"}),
+        DiscoveredMcpTool("delete_group", "delete", {"type": "object"}),
+    ]
+
+    with patch("teams_ollama_bridge.cli.build_mcp_client") as mock_build:
+        mock_client = MagicMock()
+        mock_client.list_tools.return_value = fake_tools
+        mock_build.return_value = mock_client
+        with patch("teams_ollama_bridge.cli.build_tool_policy", return_value=full_policy):
+            exit_code = cmd_mcp_check(argparse.Namespace())
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Tool-Policy: full" in captured.out
+    assert "get_state (erlaubt)" in captured.out
+    assert "delete_group (erlaubt)" in captured.out
+
+
 @pytest.mark.skipif(
     os.environ.get("RUN_MCP_INTEGRATION_TESTS", "").lower() not in ("1", "true", "yes"),
     reason="Set RUN_MCP_INTEGRATION_TESTS=true for live CPD MCP tests",
@@ -480,9 +542,10 @@ def test_mcp_integration_live_ping() -> None:
     settings = load_settings()
     if not settings.mcp_enabled or not settings.mcp_token:
         pytest.skip("MCP_ENABLED and MCP_TOKEN required for integration test")
-    policy = ToolPolicy.from_sets(
-        allowed=settings.parsed_mcp_allowed_tools,
-        blocked=settings.parsed_mcp_blocked_tools,
+    policy = ToolPolicy.from_settings(
+        settings.mcp_tool_policy,
+        settings.parsed_mcp_allowed_tools,
+        settings.parsed_mcp_blocked_tools,
     )
     client = MCPClient(
         server_url=settings.mcp_server_url,
