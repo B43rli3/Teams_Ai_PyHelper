@@ -110,6 +110,7 @@ class MCPClient:
         except (MCPAuthenticationError, MCPConsentRequiredError, MCPToolError, MCPProtocolError):
             raise
         except Exception as exc:
+            logger.exception("Unerwarteter MCP-Fehler")
             message = str(exc).lower()
             if "401" in message or "unauthorized" in message:
                 raise MCPAuthenticationError(

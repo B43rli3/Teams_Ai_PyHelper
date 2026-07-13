@@ -28,6 +28,7 @@ from teams_ollama_bridge.logging_config import setup_logging
 from teams_ollama_bridge.mcp_client import MCPClient
 from teams_ollama_bridge.mcp_models import DiscoveredMcpTool, McpCallRecord, NormalizedToolResult
 from teams_ollama_bridge.mcp_result_normalizer import (
+    compact_tool_result_for_llm,
     normalize_tool_result,
     truncate_result_text,
 )
@@ -280,6 +281,123 @@ def test_mcp_unavailable_connect(policy: ToolPolicy) -> None:
         client.list_tools()
 
 
+def test_compact_query_elements_result() -> None:
+    raw = json.dumps(
+        {
+            "ok": True,
+            "data": [
+                "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            ],
+        }
+    )
+    compact = compact_tool_result_for_llm("query_elements", raw)
+    parsed = json.loads(compact)
+    assert parsed["elementCount"] == 2
+    assert "select_elements" in parsed["nextStep"]
+
+
+def test_agent_loop_continues_after_query_elements(
+    settings: Settings, full_policy: ToolPolicy
+) -> None:
+    settings.mcp_max_tool_rounds = 4
+    ollama = MagicMock(spec=OllamaClient)
+    ollama.model_name = "test-model"
+    ollama.chat.side_effect = [
+        OllamaChatResponse(
+            content="",
+            tool_calls=[OllamaToolCall(name="query_elements", arguments={"filter": {}})],
+            model="test-model",
+        ),
+        OllamaChatResponse(
+            content="Das sind zufällige Zeichenketten...",
+            tool_calls=[],
+            model="test-model",
+        ),
+        OllamaChatResponse(
+            content="",
+            tool_calls=[OllamaToolCall(name="select_elements", arguments={"guids": ["g1"]})],
+            model="test-model",
+        ),
+        OllamaChatResponse(content="Erledigt", tool_calls=[], model="test-model"),
+    ]
+
+    mcp = MagicMock()
+    mcp.policy = full_policy
+    mcp.call_tool.return_value = NormalizedToolResult(
+        text='{"ok": true, "data": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890"]}',
+        ok=True,
+    )
+
+    tool_defs = [
+        {"type": "function", "function": {"name": "query_elements"}},
+        {"type": "function", "function": {"name": "select_elements"}},
+        {"type": "function", "function": {"name": "add_fill"}},
+    ]
+    with patch(
+        "teams_ollama_bridge.agent_loop.McpToolRegistry.discover_ollama_tools",
+        return_value=tool_defs,
+    ):
+        loop = AgentLoop(settings, ollama, mcp)
+        result = loop.run("Markiere alle Stützen im Plan rot", "System")
+
+    assert ollama.chat.call_count >= 3
+    assert mcp.call_tool.call_count >= 2
+    assert any(item.name == "select_elements" for item in result.tools_called)
+
+
+def test_agent_loop_bridge_error_does_not_abort_chain(
+    settings: Settings, full_policy: ToolPolicy
+) -> None:
+    from teams_ollama_bridge.exceptions import MCPProtocolError
+
+    ollama = MagicMock(spec=OllamaClient)
+    ollama.model_name = "test-model"
+    ollama.chat.side_effect = [
+        OllamaChatResponse(
+            content="",
+            tool_calls=[OllamaToolCall(name="set_group_fields", arguments={})],
+            model="test-model",
+        ),
+        OllamaChatResponse(
+            content="",
+            tool_calls=[OllamaToolCall(name="query_elements", arguments={})],
+            model="test-model",
+        ),
+        OllamaChatResponse(content="Fertig", tool_calls=[], model="test-model"),
+        OllamaChatResponse(
+            content="",
+            tool_calls=[OllamaToolCall(name="add_fill", arguments={"color": "red"})],
+            model="test-model",
+        ),
+        OllamaChatResponse(content="Fertig final", tool_calls=[], model="test-model"),
+    ]
+
+    mcp = MagicMock()
+    mcp.policy = full_policy
+    mcp.call_tool.side_effect = [
+        MCPProtocolError("TaskGroup error"),
+        NormalizedToolResult(text='{"ok": true}', ok=True),
+        NormalizedToolResult(text='{"ok": true}', ok=True),
+    ]
+
+    with patch(
+        "teams_ollama_bridge.agent_loop.McpToolRegistry.discover_ollama_tools",
+        return_value=[
+            {"type": "function", "function": {"name": "set_group_fields"}},
+            {"type": "function", "function": {"name": "query_elements"}},
+            {"type": "function", "function": {"name": "add_fill"}},
+        ],
+    ):
+        loop = AgentLoop(settings, ollama, mcp)
+        result = loop.run("Markiere Stützen rot", "System")
+
+    assert ollama.chat.call_count == 5
+    assert mcp.call_tool.call_count == 3
+    assert result.tools_called[0].status == "failed"
+    assert "CPD-Zugriff war aktuell nicht verfügbar" not in result.answer
+
+
 def test_agent_loop_serial_tool_calls(settings: Settings, policy: ToolPolicy) -> None:
     settings.mcp_enabled = True
     settings.processor_mode = ProcessorMode.OLLAMA
@@ -394,7 +512,7 @@ def test_agent_loop_retries_when_model_skips_tools(
         return_value=[{"type": "function", "function": {"name": "get_state"}}],
     ):
         loop = AgentLoop(settings, ollama, mcp)
-        result = loop.run("Markiere alle Stützen rot", "System")
+        result = loop.run("Was ist der aktuelle CPD-Status?", "System")
 
     assert ollama.chat.call_count == 3
     assert result.answer == "Erledigt"

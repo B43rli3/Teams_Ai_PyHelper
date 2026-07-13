@@ -10,6 +10,8 @@ from teams_ollama_bridge.mcp_models import NormalizedToolResult
 
 _TRUNCATION_NOTE = "\n[Ergebnis wurde wegen Größenlimit gekürzt.]"
 
+_ELEMENT_QUERY_TOOLS = frozenset({"query_elements", "get_elements"})
+
 
 def truncate_result_text(text: str, max_chars: int) -> tuple[str, bool]:
     if len(text) <= max_chars:
@@ -27,6 +29,62 @@ def _parse_tool_payload(raw: str) -> dict[str, Any] | None:
     if isinstance(parsed, dict):
         return parsed
     return None
+
+
+def _extract_guids_from_payload(obj: Any) -> list[str]:
+    guids: list[str] = []
+    if isinstance(obj, str):
+        stripped = obj.strip()
+        if len(stripped) >= 8:
+            guids.append(stripped)
+        return guids
+    if isinstance(obj, list):
+        for item in obj:
+            guids.extend(_extract_guids_from_payload(item))
+        return guids
+    if isinstance(obj, dict):
+        for key in ("guid", "globalId", "global_id", "id"):
+            value = obj.get(key)
+            if isinstance(value, str) and value.strip():
+                guids.append(value.strip())
+        for key in ("guids", "globalIds", "global_ids", "elements", "data", "items", "results"):
+            if key in obj:
+                guids.extend(_extract_guids_from_payload(obj[key]))
+    return guids
+
+
+def compact_tool_result_for_llm(
+    tool_name: str,
+    text: str,
+    *,
+    max_guids: int = 80,
+) -> str:
+    """Kürzt große Elementlisten auf eine für LLM-Tool-Chains nutzbare Form."""
+    if tool_name not in _ELEMENT_QUERY_TOOLS:
+        return text
+
+    parsed = _parse_tool_payload(text)
+    if parsed is None:
+        return text
+
+    guids = _extract_guids_from_payload(parsed)
+    unique_guids = list(dict.fromkeys(guids))
+    if not unique_guids:
+        return text
+
+    compact: dict[str, Any] = {
+        "ok": parsed.get("ok", True),
+        "elementCount": len(unique_guids),
+        "guids": unique_guids[:max_guids],
+        "nextStep": (
+            "Nutze select_elements mit dem Feld guids (Array dieser IDs), "
+            "danach add_fill oder set_element_fill für die gewünschte Farbe."
+        ),
+    }
+    if len(unique_guids) > max_guids:
+        compact["truncated"] = True
+        compact["totalGuids"] = len(unique_guids)
+    return json.dumps(compact, ensure_ascii=False)
 
 
 def normalize_tool_result(

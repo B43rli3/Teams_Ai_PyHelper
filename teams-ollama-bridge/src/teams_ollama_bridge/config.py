@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     )
     mcp_token: str | None = Field(default=None, alias="MCP_TOKEN")
     mcp_timeout_seconds: float = Field(default=30.0, alias="MCP_TIMEOUT_SECONDS")
-    mcp_read_timeout_seconds: float = Field(default=120.0, alias="MCP_READ_TIMEOUT_SECONDS")
+    mcp_read_timeout_seconds: float = Field(default=180.0, alias="MCP_READ_TIMEOUT_SECONDS")
     mcp_connect_timeout_seconds: float = Field(default=10.0, alias="MCP_CONNECT_TIMEOUT_SECONDS")
     mcp_max_tool_rounds: int = Field(default=8, alias="MCP_MAX_TOOL_ROUNDS")
     mcp_max_tool_calls_total: int = Field(default=16, alias="MCP_MAX_TOOL_CALLS_TOTAL")
