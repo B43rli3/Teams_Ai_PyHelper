@@ -57,6 +57,26 @@ class AttachmentProcessedInfo(BaseModel):
     error: str | None = None
 
 
+class McpToolCallInfo(BaseModel):
+    """Ein ausgeführtes MCP-Tool im Output."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    status: str
+
+
+class McpMetadata(BaseModel):
+    """Optionale MCP-Metadaten in der Output-JSON."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool
+    used: bool
+    tools_called: list[McpToolCallInfo] = Field(default_factory=list, alias="toolsCalled")
+    error: str | None = None
+
+
 class InputRequest(BaseModel):
     """Input-JSON aus dem Power-Automate-Flow."""
 
@@ -103,6 +123,7 @@ class OutputResponse(BaseModel):
     attachments_processed: list[AttachmentProcessedInfo] | None = Field(
         default=None, alias="attachmentsProcessed"
     )
+    mcp: McpMetadata | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Als Dictionary für JSON-Serialisierung."""

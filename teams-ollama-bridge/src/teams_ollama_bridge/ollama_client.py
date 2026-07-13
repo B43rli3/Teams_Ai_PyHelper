@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -24,6 +26,23 @@ from teams_ollama_bridge.mock_processor import ProcessorResult
 from teams_ollama_bridge.text_cleaner import truncate_answer
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class OllamaToolCall:
+    """Ein von Ollama angeforderter Tool-Aufruf."""
+
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class OllamaChatResponse:
+    """Antwort eines Ollama-Chat-Aufrufs mit optionalem Tool Calling."""
+
+    content: str | None
+    tool_calls: list[OllamaToolCall] = field(default_factory=list)
+    model: str = ""
 
 
 class OllamaClient:
@@ -141,6 +160,71 @@ class OllamaClient:
             answer=answer,
             model=self._model,
             processing_duration_ms=duration_ms,
+        )
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        *,
+        think: bool = False,
+    ) -> OllamaChatResponse:
+        """Multi-Turn-Chat mit optionalem Tool Calling."""
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": self._keep_alive,
+            "options": {"temperature": self._temperature},
+        }
+        if tools:
+            payload["tools"] = tools
+        if think:
+            payload["think"] = True
+
+        start = time.perf_counter()
+        data = self._post_chat(payload)
+        duration_ms = int((time.perf_counter() - start) * 1000)
+
+        message_obj = data.get("message")
+        if not isinstance(message_obj, dict):
+            raise OllamaResponseError("Ollama-Antwort enthält kein message-Feld.")
+
+        content = message_obj.get("content")
+        content_str = content if isinstance(content, str) else None
+
+        tool_calls: list[OllamaToolCall] = []
+        raw_calls = message_obj.get("tool_calls")
+        if isinstance(raw_calls, list):
+            for item in raw_calls:
+                if not isinstance(item, dict):
+                    continue
+                function = item.get("function")
+                if not isinstance(function, dict):
+                    continue
+                name = function.get("name")
+                if not isinstance(name, str):
+                    continue
+                arguments = function.get("arguments", {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        arguments = {}
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                tool_calls.append(OllamaToolCall(name=name, arguments=arguments))
+
+        logger.info(
+            "Ollama-Chat-Antwort (Modell=%s, Dauer=%dms, tool_calls=%d)",
+            self._model,
+            duration_ms,
+            len(tool_calls),
+        )
+        return OllamaChatResponse(
+            content=content_str,
+            tool_calls=tool_calls,
+            model=self._model,
         )
 
     def analyze_image(
