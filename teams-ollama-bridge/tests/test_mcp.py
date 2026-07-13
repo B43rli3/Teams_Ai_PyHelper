@@ -325,6 +325,82 @@ def test_agent_loop_serial_tool_calls(settings: Settings, policy: ToolPolicy) ->
     assert [item.name for item in result.tools_called] == ["get_state", "query_elements"]
 
 
+def test_agent_loop_tool_messages_include_tool_name(
+    settings: Settings, policy: ToolPolicy
+) -> None:
+    ollama = MagicMock(spec=OllamaClient)
+    ollama.model_name = "test-model"
+    captured_messages: list[list[dict[str, Any]]] = []
+
+    def _chat(
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        *,
+        think: bool = False,
+    ) -> OllamaChatResponse:
+        captured_messages.append(messages)
+        if len(captured_messages) == 1:
+            return OllamaChatResponse(
+                content="",
+                tool_calls=[OllamaToolCall(name="query_elements", arguments={"filter": {}})],
+                model="test-model",
+            )
+        return OllamaChatResponse(content="Fertig", tool_calls=[], model="test-model")
+
+    ollama.chat.side_effect = _chat
+
+    mcp = MagicMock()
+    mcp.policy = policy
+    mcp.call_tool.return_value = NormalizedToolResult(text='{"ok": true}', ok=True)
+
+    with patch(
+        "teams_ollama_bridge.agent_loop.McpToolRegistry.discover_ollama_tools",
+        return_value=[{"type": "function", "function": {"name": "query_elements"}}],
+    ):
+        loop = AgentLoop(settings, ollama, mcp)
+        loop.run("Markiere Stützen", "System")
+
+    second_request_messages = captured_messages[1]
+    tool_messages = [msg for msg in second_request_messages if msg.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert tool_messages[0]["tool_name"] == "query_elements"
+
+
+def test_agent_loop_retries_when_model_skips_tools(
+    settings: Settings, policy: ToolPolicy
+) -> None:
+    ollama = MagicMock(spec=OllamaClient)
+    ollama.model_name = "test-model"
+    ollama.chat.side_effect = [
+        OllamaChatResponse(
+            content="Es gibt keine direkte Funktion...",
+            tool_calls=[],
+            model="test-model",
+        ),
+        OllamaChatResponse(
+            content="",
+            tool_calls=[OllamaToolCall(name="get_state", arguments={})],
+            model="test-model",
+        ),
+        OllamaChatResponse(content="Erledigt", tool_calls=[], model="test-model"),
+    ]
+
+    mcp = MagicMock()
+    mcp.policy = policy
+    mcp.call_tool.return_value = NormalizedToolResult(text='{"ok": true}', ok=True)
+
+    with patch(
+        "teams_ollama_bridge.agent_loop.McpToolRegistry.discover_ollama_tools",
+        return_value=[{"type": "function", "function": {"name": "get_state"}}],
+    ):
+        loop = AgentLoop(settings, ollama, mcp)
+        result = loop.run("Markiere alle Stützen rot", "System")
+
+    assert ollama.chat.call_count == 3
+    assert result.answer == "Erledigt"
+    assert mcp.call_tool.call_count == 1
+
+
 def test_agent_loop_stops_at_tool_round_limit(settings: Settings, policy: ToolPolicy) -> None:
     settings.mcp_max_tool_rounds = 1
     settings.mcp_max_tool_calls_total = 8

@@ -166,6 +166,8 @@ class OllamaClient:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        *,
+        think: bool = False,
     ) -> OllamaChatResponse:
         """Multi-Turn-Chat mit optionalem Tool Calling."""
         payload: dict[str, Any] = {
@@ -177,6 +179,8 @@ class OllamaClient:
         }
         if tools:
             payload["tools"] = tools
+        if think:
+            payload["think"] = True
 
         start = time.perf_counter()
         data = self._post_chat(payload)

@@ -90,13 +90,14 @@ class Settings(BaseSettings):
     mcp_timeout_seconds: float = Field(default=30.0, alias="MCP_TIMEOUT_SECONDS")
     mcp_read_timeout_seconds: float = Field(default=120.0, alias="MCP_READ_TIMEOUT_SECONDS")
     mcp_connect_timeout_seconds: float = Field(default=10.0, alias="MCP_CONNECT_TIMEOUT_SECONDS")
-    mcp_max_tool_rounds: int = Field(default=4, alias="MCP_MAX_TOOL_ROUNDS")
-    mcp_max_tool_calls_total: int = Field(default=8, alias="MCP_MAX_TOOL_CALLS_TOTAL")
+    mcp_max_tool_rounds: int = Field(default=8, alias="MCP_MAX_TOOL_ROUNDS")
+    mcp_max_tool_calls_total: int = Field(default=16, alias="MCP_MAX_TOOL_CALLS_TOTAL")
     mcp_max_result_characters: int = Field(default=30000, alias="MCP_MAX_RESULT_CHARACTERS")
     mcp_fail_on_unavailable: bool = Field(default=False, alias="MCP_FAIL_ON_UNAVAILABLE")
     mcp_log_tool_calls: bool = Field(default=True, alias="MCP_LOG_TOOL_CALLS")
     mcp_log_tool_results: bool = Field(default=False, alias="MCP_LOG_TOOL_RESULTS")
     mcp_allow_manual_tool_test: bool = Field(default=False, alias="MCP_ALLOW_MANUAL_TOOL_TEST")
+    mcp_ollama_think: bool = Field(default=True, alias="MCP_OLLAMA_THINK")
     mcp_tool_policy: McpToolPolicyMode = Field(default="full", alias="MCP_TOOL_POLICY")
     mcp_allowed_tools: str = Field(default="", alias="MCP_ALLOWED_TOOLS")
     mcp_blocked_tools: str = Field(default="", alias="MCP_BLOCKED_TOOLS")
@@ -252,6 +253,7 @@ class Settings(BaseSettings):
             "mcp_enabled": self.mcp_enabled,
             "mcp_server_url": self.mcp_server_url,
             "mcp_tool_policy": self.mcp_tool_policy,
+            "mcp_ollama_think": self.mcp_ollama_think,
             "mcp_token_set": bool(self.mcp_token),
             "ollama_model": (
                 self.ollama_model if self.processor_mode == ProcessorMode.OLLAMA else None
